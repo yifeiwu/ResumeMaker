@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Resume Builder — interactive + printable</title>
+<meta name="description" content="Interactive resume builder: job history, skills/keywords, live A4 preview, 3 templates, manual page breaks, JSON save/import, print to PDF." />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar no-print">
+  <div class="brand">
+    <strong>Resume Builder</strong>
+    <span class="muted" id="save-status">saved</span>
+  </div>
+  <div class="toolbar" role="toolbar" aria-label="Resume actions">
+    <button id="btn-example" type="button" title="Load example resume (replaces current)">Load example</button>
+    <button id="btn-new" type="button" title="Start fresh (clears all)">New / Clear</button>
+    <span class="sep"></span>
+    <button id="btn-export-json" type="button" title="Download resume as .json file">Save .json</button>
+    <button id="btn-import-json" type="button" title="Open a .json file (replace only)">Open .json</button>
+    <button id="btn-copy-json" type="button" title="Copy JSON to clipboard">Copy JSON</button>
+    <button id="btn-undo" type="button" title="Restore state before last replace" disabled>Undo replace</button>
+    <span class="sep"></span>
+    <button id="btn-export-html" type="button" title="Download standalone printable .html file">Export .html</button>
+    <button id="btn-print" type="button" class="primary" title="Print / Save as PDF">Print / PDF</button>
+  </div>
+</header>
+<input type="file" id="file-input" accept=".json,application/json" hidden />
+
+<div id="example-banner" class="banner no-print" hidden>
+  <span>Viewing the <strong>example resume</strong>. Edit freely, or start fresh.</span>
+  <span>
+    <button id="btn-banner-fresh" type="button">Start fresh</button>
+    <button id="btn-banner-dismiss" type="button">Keep editing</button>
+  </span>
+</div>
+
+<main class="layout">
+  <!-- EDITOR -->
+  <aside id="editor" class="editor no-print" aria-label="Resume editor"></aside>
+
+  <!-- PREVIEW -->
+  <section class="preview-pane" aria-label="Resume preview">
+    <div class="preview-toolbar no-print">
+      <div class="tpl-picker" role="group" aria-label="Template picker">
+        <button type="button" data-tpl="ats" class="tpl-btn" title="ATS Classic: single column, parser-safe">ATS Classic</button>
+        <button type="button" data-tpl="modern" class="tpl-btn" title="Modern Accent: color header + skill pills">Modern</button>
+        <button type="button" data-tpl="sidebar" class="tpl-btn" title="Sidebar Pro: two-column">Sidebar</button>
+      </div>
+      <div class="preview-settings">
+        <label>Font <select id="set-fontsize">
+          <option value="small">S</option><option value="medium" selected>M</option><option value="large">L</option>
+        </select></label>
+        <label>Margins <select id="set-margins">
+          <option value="narrow">Narrow</option><option value="normal" selected>Normal</option><option value="wide">Wide</option>
+        </select></label>
+        <label>Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
+        <label class="check"><input type="checkbox" id="set-pagenum" checked /> Page #</label>
+      </div>
+    </div>
+    <p class="preview-hint no-print">Dashed lines = manual page breaks (print to 1–2 A4 pages via <strong>Print / PDF</strong>). Hidden/empty sections never print.</p>
+    <div id="preview-scroll" class="preview-scroll">
+      <div id="sheet" class="sheet"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast no-print" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

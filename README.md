@@ -25,8 +25,8 @@ Or just open `index.html` directly (file:// works, Export/Print work best over h
 - Sections: all optional (eye toggle), reorderable, per-section + per-item **page break before** toggles (dashed red indicator → real A4 break in print)
 - Custom sections: bulleted **or** paragraph layout, per-line hide/delete, break-before toggle
 - Templates: **ATS Classic** (parser-safe), **Modern** (color header + pills), **Sidebar** (two-column)
-- Settings: font S/M/L, margins, accent color, print footer, **Redact PII** (hides email/phone/location in preview + all exports)
-- **Undo/Redo:** 30-step in-memory history + Ctrl+Z / Ctrl+Shift+Z (typing uses native undo) covering *every* edit — text, settings and imports; plus a backup-slot `Undo replace` for whole-file restores
+- Settings: font S/M/L, margins, accent color, print footer, **Redact PII** (hides email/phone/location in the preview, `.html`, `.txt` and Quick PDF — `Save .json` and the JSON view always keep the real values); one undo step per colour-picker drag, not per pixel
+- **Undo/Redo:** 30-step in-memory history + Ctrl+Z / Ctrl+Shift+Z (typing uses native undo) covering *every* edit — text, settings and imports; plus a backup-slot `Undo replace` for whole-file restores. Pending keystrokes are flushed on tab hide/close, so nothing is lost to the autosave debounce
 - **Bullet coach:** per-item lint — flags short/long bullets, weak starts, missing metrics/action verbs
 - **JD matcher:** paste a job ad → local keyword score. Alias canonicalisation (k8s→kubernetes, js→javascript), plural folding, requirement-style lines weighted higher, terms already in your skill groups boosted; nothing uploaded
 - **Page guard:** live `Est. X.X pages` with over-length / awkward-break warnings (suppressed on narrow screens where the on-screen sheet isn't A4 width)
@@ -35,14 +35,18 @@ Or just open `index.html` directly (file:// works, Export/Print work best over h
 - **Example resume:** auto-loads on first visit (`Alex Morgan` demo, 3 jobs, `breakBefore` on the 3rd to show 2-page output); `Load example` anytime
 - **Printable file:** `Print / PDF` uses `@page A4` + `@media print` (only the sheet prints, selectable text); `Export .html` standalone printable file that keeps all template CSS; `Export .txt` plain-text ATS version; `Quick PDF` one-click via html2pdf CDN (beta, rasterized, SRI-pinned, needs network)
 - **Privacy:** everything stays in `localStorage`; Privacy card has Redact toggle + Erase-all (also purges keys from the retired multi-profile version); mobile Edit/Preview tabs, skip link, focus-visible styles, `aria-pressed` toggles
-- **Self-test:** `/test.html` runs 12 automated checks (schema, migrate/repair, validation, round-trip, coach, JD aliasing + weighting, txt output, sheet output, custom sections) — no network, no build
+- **Self-test:** `/test.html` (12 unit checks) + `/e2e.html` (30 browser integration checks) — no network, no build; `./check.ps1` runs both
 
 ## Verify
 
 ```powershell
-python -m http.server 8000
-# open http://localhost:8000/test.html — expect "All 12 checks passed"
+.\check.ps1
+# starts a temp server, runs /test.html + /e2e.html in headless Edge, exits non-zero on failure
 ```
+
+Open them by hand instead: `python -m http.server 8000`, then
+`http://localhost:8000/test.html` (12 unit checks) and `http://localhost:8000/e2e.html`
+(30 browser integration checks: JSON view round-trip, invalid input, staleness guard, export/print paths, undo granularity).
 
 ## JSON format
 

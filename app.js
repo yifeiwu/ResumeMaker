@@ -523,7 +523,8 @@ function renderEditor() {
 
   <div class="card">
     <h2>Privacy</h2>
-    <p class="hint">All data stays in this browser (<code>localStorage</code>). JSON/PDF/TXT exports are files you control — nothing is uploaded to any server.</p>
+    <p class="hint">All data stays in this browser (<code>localStorage</code>). JSON/HTML/PDF/TXT exports are files you control — nothing is uploaded to any server.</p>
+    <p class="hint">Redaction applies to the preview, <code>.html</code>, <code>.txt</code> and Quick PDF. <strong>Save .json</strong> and the JSON view always contain your real contact details — check before sharing.</p>
     <div class="mini-btns">
       <button type="button" data-act="privacy-redact">${state.settings.redactPII ? "Show PII" : "Redact PII for sharing"}</button>
       <button type="button" data-act="privacy-erase">Erase ALL local data</button>
@@ -744,18 +745,16 @@ function paintPreview() {
 
 /* ---- page overflow guard ---- */
 function updatePageEstimate() {
-  requestAnimationFrame(() => {
-    const sheet = $("#sheet"), el = $("#page-est");
-    if (!sheet || !el || !sheet.clientWidth) return; // hidden (JSON view) → no meaningless numbers
-    if (sheet.clientWidth < 620) { el.textContent = "Est. n/a on a narrow screen — print for real page count"; el.className = ""; return; }
-    const pages = sheet.scrollHeight / ((sheet.clientWidth * 297) / 210);
-    const manual = (sheet.innerHTML.match(/pb-indicator/g) || []).length;
-    let msg = `Est. ${pages.toFixed(1)} pages (${manual} manual break${manual === 1 ? "" : "s"})`;
-    if (pages > 2.05) msg += " — over 2 pages: trim or add a break";
-    else if (pages > 1.05 && pages < 1.25) msg += " — awkward 1.2 pages: trim a little or force 2 clean pages";
-    el.textContent = msg;
-    el.className = pages > 2.05 ? "over" : pages > 1.05 && pages < 1.25 ? "warn" : "";
-  });
+  const sheet = $("#sheet"), el = $("#page-est");
+  if (!sheet || !el || !sheet.clientWidth) return; // hidden (JSON view) → no meaningless numbers
+  if (sheet.clientWidth < 620) { el.textContent = "Est. n/a on a narrow screen — print for real page count"; el.className = ""; return; }
+  const pages = sheet.scrollHeight / ((sheet.clientWidth * 297) / 210);
+  const manual = (sheet.innerHTML.match(/pb-indicator/g) || []).length;
+  let msg = `Est. ${pages.toFixed(1)} pages (${manual} manual break${manual === 1 ? "" : "s"})`;
+  if (pages > 2.05) msg += " — over 2 pages: trim or add a break";
+  else if (pages > 1.05 && pages < 1.25) msg += " — awkward 1.2 pages: trim a little or force 2 clean pages";
+  el.textContent = msg;
+  el.className = pages > 2.05 ? "over" : pages > 1.05 && pages < 1.25 ? "warn" : "";
 }
 
 /* ================= PLAIN TEXT (ATS .txt) ================= */
@@ -986,7 +985,16 @@ function bindToolbar() {
   $$(".tpl-btn").forEach((b) => b.addEventListener("click", () => { pushHistory(); state.settings.templateId = b.dataset.tpl; persist(); renderPreview(); }));
   const fz = $("#set-fontsize"); if (fz) fz.addEventListener("change", (e) => { pushHistory(); state.settings.fontSize = e.target.value; persist(); renderPreview(); });
   const mg = $("#set-margins"); if (mg) mg.addEventListener("change", (e) => { pushHistory(); state.settings.margins = e.target.value; persist(); renderPreview(); });
-  const ac = $("#set-accent"); if (ac) ac.addEventListener("input", (e) => { pushHistory(); state.settings.accent = e.target.value; persist(); renderPreview(); });
+  const ac = $("#set-accent");
+  if (ac) {
+    let accentSnapshotted = false;
+    // a colour-picker drag fires input dozens of times: one undo step per drag, not per pixel
+    ac.addEventListener("input", (e) => {
+      if (!accentSnapshotted) { pushHistory(); accentSnapshotted = true; }
+      state.settings.accent = e.target.value; persist(); renderPreview();
+    });
+    ac.addEventListener("change", () => { accentSnapshotted = false; });
+  }
   const pn = $("#set-pagenum"); if (pn) pn.addEventListener("change", (e) => { pushHistory(); state.settings.showPageNumbers = e.target.checked; persist(); renderPreview(); });
   const rd = $("#set-redact"); if (rd) rd.addEventListener("change", (e) => { pushHistory(); state.settings.redactPII = e.target.checked; persist(); renderEditor(); renderPreview(); });
   const bp = $("#btn-print"); if (bp) bp.addEventListener("click", () => { persist(true); showResumeView(); paintPreview(); window.print(); });
@@ -1009,6 +1017,9 @@ function bindToolbar() {
   const fi = $("#file-input"); if (fi) fi.addEventListener("change", (e) => { doImportFile(e.target.files[0]); e.target.value = ""; });
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); doImportFile(e.dataTransfer.files[0]); } });
+  // never lose the last debounced keystrokes to a closed tab
+  document.addEventListener("visibilitychange", () => { if (document.hidden) persist(true); });
+  window.addEventListener("pagehide", () => persist(true));
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return; // let native undo work while typing
@@ -1029,10 +1040,11 @@ function bindToolbar() {
   document.body.classList.add("show-editor");
 }
 
-/* test hooks (used by test.html — init is skipped there, so these stay pure) */
+/* test hooks (used by test.html + e2e.html — init is skipped in test.html, so these stay pure) */
 window.ResumeTest = {
   SCHEMA_VERSION, validateResumeFile, migrate, normalizeImport, lintBullet, extractJdKeywords, jdResult,
   resumeToText, sampleState, defaultState, currentEnvelope, buildSheetHtml, isSectionEmpty, allSections,
+  flushPreview: paintPreview,
   getState: () => state, setState: (s) => { state = migrate(s); },
 };
 

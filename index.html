@@ -69,14 +69,14 @@
         </select></label>
         <label for="set-accent">Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
         <label class="check" title="Print footer with your name and title. For page numbers enable your browser's own header/footer in the print dialog."><input type="checkbox" id="set-pagenum" checked /> Footer</label>
-        <label class="check" title="Hide email/phone/location in preview + exports"><input type="checkbox" id="set-redact" /> Redact PII</label>
+        <label class="check" title="Hide email/phone/location in the preview, .html, .txt and Quick PDF. Save .json and the JSON view keep the real values."><input type="checkbox" id="set-redact" /> Redact PII</label>
       </div>
     </div>
     <p class="preview-hint no-print"><span id="page-est">Est. — pages</span> · Dashed lines = manual page breaks (print to 1–2 A4 pages via <strong>Print / PDF</strong>). Hidden/empty sections never print. <span class="muted">Data stays in your browser — nothing is uploaded.</span></p>
     <div id="preview-scroll" class="preview-scroll" tabindex="-1">
       <div id="sheet" class="sheet"></div>
       <div id="json-view" class="json-view" hidden>
-        <p class="hint">Editable snapshot of the current resume. Apply with <strong>Apply</strong> or <strong>Ctrl+Enter</strong>. Invalid content never wipes your work.</p>
+        <p class="hint">Editable snapshot of the current resume. Apply with <strong>Apply</strong> or <strong>Ctrl+Enter</strong>. Invalid content never wipes your work. These are your <strong>real</strong> contact details — redaction does not apply here.</p>
         <label for="json-view-text">Resume JSON</label>
         <textarea id="json-view-text" spellcheck="false" autocomplete="off"></textarea>
         <p id="json-stale" class="json-stale" hidden>Heads up: the resume changed elsewhere since this snapshot was taken. <strong>Reset to current</strong> refreshes it, or keep your edits and Apply (newer changes are discarded but Undo-able).</p>

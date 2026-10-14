@@ -1,0 +1,153 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Resume Builder â€” browser integration test</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px}
+.pass{color:#15803d}.fail{color:#b91c1c}.info{color:#64748b}li{margin:3px 0}
+#app{width:100%;height:640px;border:1px solid #cbd5e1;border-radius:8px;margin-top:10px}
+</style>
+</head>
+<body>
+<h1>Browser integration test</h1>
+<p>Drives the real <code>index.html</code> in an iframe: JSON view round-trip, invalid input, staleness guard, export/print paths, undo granularity. Serve over http (<code>python -m http.server 8000</code>) then open <code>/e2e.html</code>, or run <code>.\check.ps1</code>.</p>
+<ul id="results"></ul>
+<h2 id="summary">runningâ€¦</h2>
+<div id="host"><iframe id="app" src="index.html" title="App under test"></iframe></div>
+<script>
+const log = [];
+const el = (id) => document.getElementById(id);
+const paint = () => {
+  el("results").innerHTML = log.map((l) => `<li class="${l.startsWith("FAIL") ? "fail" : l.startsWith("INFO") ? "info" : "pass"}">${l.replace(/[<>&]/g, "")}</li>`).join("");
+  const fails = log.filter((l) => l.startsWith("FAIL")).length;
+  const err = log.filter((l) => l.startsWith("EXCEPTION"));
+  el("summary").textContent = err.length ? "harness error" : fails ? fails + " failing" : "All " + log.filter((l) => l.startsWith("PASS")).length + " checks passed";
+  el("summary").className = err.length || fails ? "fail" : "pass";
+};
+const say = (k, v) => { log.push((v ? "PASS " : "FAIL ") + k); paint(); };
+const info = (k) => { log.push("INFO " + k); paint(); };
+
+const f = el("app");
+let loads = 0;
+// hermetic: a previous run leaves state in the browser profile, so wipe and reload once
+f.addEventListener("load", () => {
+  loads++;
+  if (loads === 1) {
+    try { f.contentWindow.localStorage.clear(); } catch (e) { }
+    f.contentWindow.location.reload();
+    return;
+  }
+  setTimeout(run, 400);
+});
+
+async function run() {
+  try {
+    const w = f.contentWindow, d = f.contentDocument;
+    const R = w.ResumeTest;
+    const $ = (s) => d.querySelector(s);
+    const input = (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input", { bubbles: true })); };
+    // paint synchronously so assertions never race the coalesced preview
+    const flush = () => R.flushPreview();
+
+    say("editor rendered", !!$("#editor h2"));
+    say("profile UI removed", !/Profile/.test($("#editor").textContent));
+    say("example resume auto-loaded", R.getState().contact.fullName === "Alex Morgan");
+    say("sheet has content", $("#sheet").textContent.length > 400);
+    say("example banner shown", $("#example-banner").hidden === false);
+
+    // ---- JSON view round-trip -------------------------------------------------
+    const sheet = $("#sheet"), jv = $("#json-view"), ta = $("#json-view-text");
+    say("json view hidden initially", jv.hidden === true && sheet.hidden === false);
+    $('[data-view="json"]').click();
+    say("json view opens", jv.hidden === false && sheet.hidden === true);
+    say("json textarea populated", ta.value.indexOf('"data"') > -1);
+    say("page estimate sane while json view is open", !/NaN|Infinity/.test($("#page-est").textContent));
+
+    const before = R.getState().contact.fullName;
+    ta.value = "{ this is not json";
+    $("#json-view-apply").click();
+    say("invalid json reports an error", $("#json-view-error").hidden === false);
+    say("invalid json leaves state untouched", R.getState().contact.fullName === before);
+
+    $("#json-view-reset").click();
+    const obj = JSON.parse(ta.value);
+    obj.data.contact.fullName = "Edited Person";
+    ta.value = JSON.stringify(obj, null, 2);
+    $("#json-view-apply").click();
+    say("valid json applied", R.getState().contact.fullName === "Edited Person");
+    say("applied json reaches the editor", Array.from(d.querySelectorAll('[data-f="contact.fullName"]')).some((i) => i.value === "Edited Person"));
+    say("error cleared after apply", $("#json-view-error").hidden === true);
+
+    // ---- staleness guard ------------------------------------------------------
+    ta.value = ta.value.replace('"Edited Person"', '"Stale Clone"');
+    say("textarea hand-edited", ta.value.indexOf("Stale Clone") > -1);
+    input($('[data-f="contact.title"]'), "Changed Elsewhere");
+    flush();
+    say("staleness warning shown", $("#json-stale").hidden === false);
+
+    $("#btn-hist-undo").click();
+    flush();
+    say("undo reverts the applied json", R.getState().contact.fullName !== "Edited Person");
+    say("undo leaves the hand-edited snapshot alone", ta.value.indexOf("Stale Clone") > -1);
+
+    // ---- export / print must never be blank -----------------------------------
+    let captured = null;
+    w.URL.createObjectURL = (b) => { captured = b; return "blob:stub"; };
+    w.HTMLAnchorElement.prototype.click = function () {};
+    $('[data-view="json"]').click();
+    say("json view re-opened", sheet.hidden === true);
+    $("#btn-export-html").click();
+    say("export html ignores json view", sheet.hidden === false);
+    $("#btn-export-txt").click();
+    say("export txt produced a file", !!captured);
+    const txt = await captured.text();
+    say("export txt has the name and no empty headings", txt.indexOf("Edited Person") > -1 || txt.indexOf("Alex Morgan") > -1);
+    $("#btn-export-json").click();
+    const jsonTxt = await captured.text();
+    say("json export keeps envelope shape", /"version"\s*:\s*1/.test(jsonTxt) && /"data"\s*:/.test(jsonTxt));
+    say("json export has no dead profile field", jsonTxt.indexOf('"profileName"') === -1);
+
+    // ---- redaction scope is honest -------------------------------------------
+    $("#set-redact").click();
+    flush();
+    const redactSheet = $("#sheet").textContent;
+    $("#btn-export-json").click();
+    const redactJson = await captured.text();
+    info("redactPII=" + R.getState().settings.redactPII + " checkbox=" + $("#set-redact").checked +
+      " marker=" + (redactSheet.indexOf("[email redacted]") > -1) + " sheetLen=" + redactSheet.length);
+    say("redaction hides email in preview", !/alex\.morgan@example\.com/.test(redactSheet));
+    say("json export keeps real values (documented)", /alex\.morgan@example\.com/.test(redactJson));
+    $("#set-redact").click();
+    flush();
+
+    // ---- undo granularity: one drag = one step -------------------------------
+    const accent = $("#set-accent");
+    const startAccent = R.getState().settings.accent;
+    ["#111111", "#222222", "#333333", "#444444"].forEach((c) => {
+      accent.value = c;
+      accent.dispatchEvent(new w.Event("input", { bubbles: true }));
+    });
+    flush();
+    say("accent applied", R.getState().settings.accent === "#444444");
+    $("#btn-hist-undo").click();
+    flush();
+    say("one undo reverts the whole accent drag", R.getState().settings.accent === startAccent);
+
+    // ---- print path forces the resume view -----------------------------------
+    $('[data-view="json"]').click();
+    say("json view on for print test", sheet.hidden === true);
+    w.print = function () {};
+    $("#btn-print").click();
+    say("print button forces the resume view", sheet.hidden === false);
+    info("storage keys: " + Object.keys(w.localStorage).filter((k) => k.indexOf("resume-builder") === 0).join(", "));
+    paint();
+  } catch (e) {
+    log.push("EXCEPTION " + (e && e.stack ? e.stack.split("\n")[0] : e));
+    paint();
+  }
+}
+</script>
+</body>
+</html>

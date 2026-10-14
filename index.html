@@ -8,21 +8,29 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<a class="skip no-print" href="#sheet">Skip to preview</a>
 <header class="topbar no-print">
   <div class="brand">
     <strong>Resume Builder</strong>
-    <span class="muted" id="save-status">saved</span>
+    <span class="muted" id="save-status" role="status">saved</span>
   </div>
+  <nav class="mobile-tabs" aria-label="Switch panes">
+    <button id="tab-edit" type="button" class="active">Edit</button>
+    <button id="tab-preview" type="button">Preview</button>
+  </nav>
   <div class="toolbar" role="toolbar" aria-label="Resume actions">
     <button id="btn-example" type="button" title="Load example resume (replaces current)">Load example</button>
     <button id="btn-new" type="button" title="Start fresh (clears all)">New / Clear</button>
     <span class="sep"></span>
     <button id="btn-export-json" type="button" title="Download resume as .json file">Save .json</button>
     <button id="btn-import-json" type="button" title="Open a .json file (replace only)">Open .json</button>
-    <button id="btn-copy-json" type="button" title="Copy JSON to clipboard">Copy JSON</button>
     <button id="btn-undo" type="button" title="Restore state before last replace" disabled>Undo replace</button>
+    <button id="btn-hist-undo" type="button" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btn-hist-redo" type="button" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled>Redo</button>
     <span class="sep"></span>
     <button id="btn-export-html" type="button" title="Download standalone printable .html file">Export .html</button>
+    <button id="btn-export-txt" type="button" title="Download plain-text ATS version">Export .txt</button>
+    <button id="btn-quick-pdf" type="button" title="One-click PDF via html2pdf (beta: rasterized, may lose selectable text)">Quick PDF</button>
     <button id="btn-print" type="button" class="primary" title="Print / Save as PDF">Print / PDF</button>
   </div>
 </header>
@@ -48,20 +56,36 @@
         <button type="button" data-tpl="modern" class="tpl-btn" title="Modern Accent: color header + skill pills">Modern</button>
         <button type="button" data-tpl="sidebar" class="tpl-btn" title="Sidebar Pro: two-column">Sidebar</button>
       </div>
+      <div class="view-picker" role="group" aria-label="Preview view">
+        <button type="button" data-view="resume" class="view-btn active" title="Show the resume preview">Resume</button>
+        <button type="button" data-view="json" class="view-btn" title="Show editable JSON for the active profile">JSON</button>
+      </div>
       <div class="preview-settings">
-        <label>Font <select id="set-fontsize">
+        <label for="set-fontsize">Font <select id="set-fontsize">
           <option value="small">S</option><option value="medium" selected>M</option><option value="large">L</option>
         </select></label>
-        <label>Margins <select id="set-margins">
+        <label for="set-margins">Margins <select id="set-margins">
           <option value="narrow">Narrow</option><option value="normal" selected>Normal</option><option value="wide">Wide</option>
         </select></label>
-        <label>Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
+        <label for="set-accent">Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
         <label class="check"><input type="checkbox" id="set-pagenum" checked /> Page #</label>
+        <label class="check" title="Hide email/phone/location in preview + exports"><input type="checkbox" id="set-redact" /> Redact PII</label>
       </div>
     </div>
-    <p class="preview-hint no-print">Dashed lines = manual page breaks (print to 1–2 A4 pages via <strong>Print / PDF</strong>). Hidden/empty sections never print.</p>
+    <p class="preview-hint no-print"><span id="page-est">Est. — pages</span> · Dashed lines = manual page breaks (print to 1–2 A4 pages via <strong>Print / PDF</strong>). Hidden/empty sections never print. <span class="muted">Data stays in your browser — nothing is uploaded.</span></p>
     <div id="preview-scroll" class="preview-scroll">
       <div id="sheet" class="sheet"></div>
+      <div id="json-view" class="json-view" hidden>
+        <p class="hint">Editable JSON snapshot of the active profile — captured when you opened this view. Edit, then <strong>Apply</strong> (Ctrl+Enter). Invalid content never wipes your work; errors appear below.</p>
+        <label for="json-view-text">Resume JSON</label>
+        <textarea id="json-view-text" spellcheck="false" autocomplete="off"></textarea>
+        <div id="json-view-error" class="json-error" role="alert" hidden></div>
+        <div class="mini-btns json-view-btns">
+          <button id="json-view-apply" type="button" class="primary">Apply</button>
+          <button id="json-view-copy" type="button">Copy</button>
+          <button id="json-view-reset" type="button">Reset to current</button>
+        </div>
+      </div>
     </div>
   </section>
 </main>

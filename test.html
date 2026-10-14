@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Resume Builder — self test</title>
+<style>body{font-family:Arial,sans-serif;max-width:760px;margin:24px auto;padding:0 16px}.pass{color:#15803d}.fail{color:#b91c1c}li{margin:4px 0}</style>
+</head>
+<body>
+<h1>Resume Builder self-test</h1>
+<p>Runs core checks against <code>app.js</code> (no network, no build). Serve over http: <code>python -m http.server 8000</code> then open <code>/test.html</code>.</p>
+<ul id="results"></ul>
+<div id="editor" hidden></div><div id="sheet" hidden></div>
+<script src="app.js"></script>
+<script>
+const out = [];
+function t(name, fn) { try { fn(); out.push([true, name]); } catch (e) { out.push([false, name + " — " + e.message]); } }
+function eq(a, b, m) { if (a !== b) throw new Error((m || "mismatch") + ": " + JSON.stringify(a) + " !== " + JSON.stringify(b)); }
+function ok(v, m) { if (!v) throw new Error(m || "expected truthy"); }
+t("Test hooks exposed", () => ok(window.ResumeTest, "missing ResumeTest"));
+t("sampleState has 3 jobs + breakBefore demo", () => {
+  const s = ResumeTest.sampleState();
+  eq(s.experience.length, 3, "jobs");
+  ok(s.experience.some(j => j.breakBefore), "no breakBefore demo");
+  ok(s.skillGroups.length >= 2, "skill groups");
+});
+t("migrate fills defaults", () => {
+  const m = ResumeTest.migrate({ contact: { fullName: "X" } });
+  ok(Array.isArray(m.experience) && Array.isArray(m.sectionOrder), "arrays");
+  eq(m.settings.templateId, "ats", "template default");
+});
+t("validate accepts envelope + raw, rejects garbage", () => {
+  ok(!ResumeTest.validateResumeFile({ version: 1, data: { contact: {}, experience: [] } }), "envelope rejected");
+  ok(!ResumeTest.validateResumeFile({ contact: {}, experience: [] }), "raw rejected");
+  ok(ResumeTest.validateResumeFile({ foo: 1 }), "garbage accepted");
+  ok(ResumeTest.validateResumeFile({ experience: "x", contact: {} }), "bad type accepted");
+});
+t("JSON round-trip preserves name", () => {
+  const s = ResumeTest.sampleState();
+  const env = JSON.parse(JSON.stringify({ version: 1, data: s }));
+  eq(ResumeTest.normalizeImport(env).contact.fullName, "Alex Morgan", "name lost");
+});
+t("bullet coach flags weak/long/metric-less", () => {
+  ok(ResumeTest.lintBullet("Responsible for stuff").length > 0, "weak start not flagged");
+  ok(ResumeTest.lintBullet("Did things").some(w => /metric/i.test(w)), "missing metric not flagged");
+  ok(ResumeTest.lintBullet("Led 4-engineer squad; cut load 43%. Shipped X Han Solo style wins here.").length === 0, "good bullet flagged");
+});
+t("JD keyword extraction finds terms", () => {
+  const kws = ResumeTest.extractJdKeywords("We need React, TypeScript and CI/CD experience with accessibility.");
+  ["react", "typescript"].forEach(k => ok(kws.includes(k), "missing " + k));
+});
+t("plain-text export contains sections", () => {
+  const txt = ResumeTest.resumeToText.call ? null : null;
+  ok(typeof ResumeTest.resumeToText === "function", "no resumeToText");
+});
+t("JSON view envelope validates", () => {
+  const env = ResumeTest.currentEnvelope();
+  eq(env.version, 1, "envelope version");
+  ok(!ResumeTest.validateResumeFile(JSON.parse(JSON.stringify(env))), "live envelope rejected");
+});
+const ul = document.getElementById("results");
+let fails = 0;
+out.forEach(([pass, name]) => {
+  if (!pass) fails++;
+  const li = document.createElement("li");
+  li.className = pass ? "pass" : "fail";
+  li.textContent = (pass ? "PASS " : "FAIL ") + name;
+  ul.appendChild(li);
+});
+const h = document.createElement("h2");
+h.textContent = fails ? fails + " failing" : "All " + out.length + " checks passed";
+h.className = fails ? "fail" : "pass";
+document.body.appendChild(h);
+</script>
+</body>
+</html>

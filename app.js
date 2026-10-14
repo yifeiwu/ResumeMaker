@@ -2,7 +2,8 @@
 "use strict";
 const LS_KEY = "resume-builder-v1";
 const BACKUP_KEY = "resume-builder-backup-v1";
-const EXAMPLE_FLAG = "resume-builder-example";
+const PROFILES_KEY = "resume-builder-profiles-v1";
+const HIST_MAX = 30;
 
 const SECTION_DEFS = [
   { id: "summary", label: "Summary" },
@@ -18,11 +19,13 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const uid = () => Math.random().toString(36).slice(2, 9);
 const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clone = (o) => JSON.parse(JSON.stringify(o));
 
 function defaultState() {
   return {
     version: 1,
     isExample: false,
+    profileName: "My resume",
     contact: { fullName: "", title: "", email: "", phone: "", location: "", linkedin: "", github: "", portfolio: "" },
     summary: "",
     skillGroups: [{ id: uid(), label: "Core skills", keywords: "" }],
@@ -36,13 +39,15 @@ function defaultState() {
     sectionOrder: ["summary", "experience", "skills", "education", "projects", "certifications", "languages"],
     sectionsVisible: { summary: true, experience: true, skills: true, education: true, projects: false, certifications: false, languages: false },
     sectionBreaks: { summary: false, experience: false, skills: false, education: false, projects: false, certifications: false, languages: false },
-    settings: { templateId: "ats", fontSize: "medium", margins: "normal", accent: "#1d4ed8", showPageNumbers: true },
+    settings: { templateId: "ats", fontSize: "medium", margins: "normal", accent: "#1d4ed8", showPageNumbers: true, redactPII: false },
+    jdText: "",
   };
 }
 
 function sampleState() {
   const s = defaultState();
   s.isExample = true;
+  s.profileName = "Example — Frontend";
   s.contact = { fullName: "Alex Morgan", title: "Senior Frontend Engineer", email: "alex.morgan@example.com", phone: "+1 (555) 014-2288", location: "Austin, TX", linkedin: "linkedin.com/in/alexmorgan", github: "github.com/alexmorgan", portfolio: "alexmorgan.dev" };
   s.summary = "Frontend engineer with 8+ years building responsive, accessible web apps in React/TypeScript. Led migration of a 200k-user dashboard to Vite + Tailwind, cutting load time 43%. Known for clean ATS-friendly delivery and mentoring juniors.";
   s.skillGroups = [
@@ -63,17 +68,37 @@ function sampleState() {
   s.customSections = [];
   s.sectionsVisible = { summary: true, experience: true, skills: true, education: true, projects: true, certifications: false, languages: false };
   s.sectionBreaks = { summary: false, experience: false, skills: false, education: false, projects: false, certifications: false, languages: false };
-  s.settings = { templateId: "ats", fontSize: "medium", margins: "normal", accent: "#1d4ed8", showPageNumbers: true };
+  s.jdText = "";
   return s;
 }
 
-let state = load() || defaultState();
+/* ================= PROFILES ================= */
+function stateKey(id) { return LS_KEY + ":" + id; }
+function loadMeta() {
+  try { const m = JSON.parse(localStorage.getItem(PROFILES_KEY) || "null"); if (m && Array.isArray(m.profiles) && m.activeId) return m; } catch {}
+  return null;
+}
+function saveMeta(m) { try { localStorage.setItem(PROFILES_KEY, JSON.stringify(m)); } catch {} }
+function ensureProfiles() {
+  let meta = loadMeta();
+  if (meta) return meta;
+  // migrate legacy single-state if present
+  let legacy = null;
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) legacy = migrate(JSON.parse(raw)); } catch {}
+  const id = uid();
+  meta = { profiles: [{ id, name: (legacy && legacy.profileName) || "My resume", updatedAt: Date.now() }], activeId: id };
+  saveMeta(meta);
+  try { localStorage.setItem(stateKey(id), JSON.stringify(legacy || sampleState())); } catch {}
+  return meta;
+}
+let meta = ensureProfiles();
+function loadProfileState(id) {
+  try { const raw = localStorage.getItem(stateKey(id)); if (raw) return migrate(JSON.parse(raw)); } catch {}
+  return defaultState();
+}
+let state = loadProfileState(meta.activeId);
 let saveTimer = null;
 
-function load() {
-  try { const raw = localStorage.getItem(LS_KEY); if (!raw) return null; const o = JSON.parse(raw); return migrate(o); }
-  catch { return null; }
-}
 function migrate(o) {
   if (!o || typeof o !== "object") return null;
   const d = defaultState();
@@ -82,26 +107,124 @@ function migrate(o) {
   out.settings = Object.assign(d.settings, o.settings || {});
   out.sectionsVisible = Object.assign(d.sectionsVisible, o.sectionsVisible || {});
   out.sectionBreaks = Object.assign(d.sectionBreaks, o.sectionBreaks || {});
+  if (typeof out.jdText !== "string") out.jdText = "";
+  if (typeof out.profileName !== "string") out.profileName = "My resume";
   if (!Array.isArray(out.sectionOrder) || !out.sectionOrder.length) out.sectionOrder = d.sectionOrder.slice();
   ["skillGroups", "experience", "education", "projects", "certifications", "languages", "customSections"].forEach((k) => { if (!Array.isArray(out[k])) out[k] = []; });
   return out;
 }
+function touchMeta() {
+  const p = meta.profiles.find((x) => x.id === meta.activeId);
+  if (p) { p.name = state.profileName || p.name; p.updatedAt = Date.now(); }
+  saveMeta(meta);
+}
 function persist(immediate) {
-  const write = () => { try { localStorage.setItem(LS_KEY, JSON.stringify({ ...state, isExample: state.isExample })); setSaveStatus("saved " + new Date().toLocaleTimeString()); } catch {} };
+  const write = () => {
+    try {
+      localStorage.setItem(stateKey(meta.activeId), JSON.stringify(state));
+      localStorage.setItem(LS_KEY, JSON.stringify(state)); // legacy mirror for downgrade safety
+      touchMeta(); setSaveStatus("saved " + new Date().toLocaleTimeString());
+    } catch {}
+  };
   setSaveStatus("saving…");
   if (immediate) { clearTimeout(saveTimer); write(); return; }
   clearTimeout(saveTimer); saveTimer = setTimeout(write, 500);
 }
 function setSaveStatus(t) { const el = $("#save-status"); if (el) el.textContent = t; }
-function backupCurrent() { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(state)); $("#btn-undo").disabled = false; } catch {} }
+function backupCurrent() { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(state)); const b = $("#btn-undo"); if (b) b.disabled = false; } catch {} }
 function hasBackup() { try { return !!localStorage.getItem(BACKUP_KEY); } catch { return false; } }
+
+/* ================= UNDO HISTORY ================= */
+let histPast = [], histFuture = [];
+let pendingPreEdit = null;
+function pushHistory() {
+  const snap = JSON.stringify(state);
+  if (histPast.length && histPast[histPast.length - 1] === snap) return;
+  histPast.push(snap);
+  if (histPast.length > HIST_MAX) histPast.shift();
+  histFuture = [];
+  syncHistButtons();
+}
+function undoHistory() {
+  if (!histPast.length) return toast("Nothing to undo");
+  histFuture.push(JSON.stringify(state));
+  state = migrate(JSON.parse(histPast.pop()));
+  persist(true); renderEditor(); renderPreview(); syncHistButtons(); toast("Undone");
+}
+function redoHistory() {
+  if (!histFuture.length) return toast("Nothing to redo");
+  histPast.push(JSON.stringify(state));
+  state = migrate(JSON.parse(histFuture.pop()));
+  persist(true); renderEditor(); renderPreview(); syncHistButtons(); toast("Redone");
+}
+function syncHistButtons() {
+  const u = $("#btn-hist-undo"), r = $("#btn-hist-redo");
+  if (u) u.disabled = !histPast.length;
+  if (r) r.disabled = !histFuture.length;
+}
+
+/* ================= BULLET COACH ================= */
+const WEAK_STARTS = ["responsible for", "helped", "worked on", "assisted", "tasked with", "helped with", "worked with", "in charge of"];
+const ACTION_VERBS = ["led", "built", "shipped", "launched", "migrated", "designed", "owned", "drove", "cut", "improved", "increased", "reduced", "mentored", "introduced", "partnered", "added", "created", "automated", "converted"];
+function lintBullet(b) {
+  const w = [];
+  const s = (b || "").trim();
+  if (!s) return w;
+  if (s.length < 24) w.push("Too short — add scope or outcome.");
+  if (s.length > 170) w.push("Long (" + s.length + " chars) — consider splitting.");
+  const low = s.toLowerCase();
+  if (WEAK_STARTS.some((p) => low.startsWith(p))) w.push("Weak start — use an action verb (Led/Built/Shipped…).");
+  if (!/\d/.test(s)) w.push("No metric — add %, $, time, or count.");
+  if (!ACTION_VERBS.some((v) => low.startsWith(v))) && !/\b(led|built|shipped|cut|improved|migrated|designed|owned|drove|mentored)\b/.test(low)) w.push("No strong action verb detected.");
+  return w;
+}
+function coachForBullets(bullets) {
+  const items = (bullets || []).filter(Boolean);
+  if (!items.length) return `<div class="coach">No bullets yet — add 2–4 per role, each with a metric.</div>`;
+  const flagged = [];
+  items.forEach((b, i) => { const w = lintBullet(b); if (w.length) flagged.push(`<li><strong>#${i + 1}:</strong> ${esc(w.join(" "))}</li>`); });
+  const withMetric = items.filter((b) => /\d/.test(b)).length;
+  if (!flagged.length) return `<div class="coach good">✓ ${items.length} bullets, ${withMetric} with metrics. Strong.</div>`;
+  return `<div class="coach bad"><strong>Coach:</strong> ${withMetric}/${items.length} bullets have metrics.<ul>${flagged.slice(0, 4).join("")}</ul></div>`;
+}
+
+/* ================= JD MATCHER ================= */
+const STOPWORDS = new Set(("we,you,our,the,and,for,with,will,are,has,have,from,that,this,who,can,all,any,per,into,years,year,work,team,role,ability,strong,plus,including,within,across,your,about,join,help,needs,using,used,use,etc,minimum,preferred,requirements,required,responsibilities,experience,knowledge,skills,experience,benefits").split(","));
+function resumeCorpus() {
+  const parts = [state.summary, state.skillsBrief,
+    ...state.skillGroups.map((g) => (g.label || "") + " " + (g.keywords || "")),
+    ...state.experience.flatMap((j) => [j.title, j.company, ...(j.bullets || [])]),
+    ...state.projects.flatMap((p) => [p.name, p.tech, ...(p.bullets || [])]),
+    ...state.education.map((e) => [e.school, e.degree, e.field].join(" "))];
+  return parts.join(" \n").toLowerCase();
+}
+function extractJdKeywords(jd) {
+  const freq = {};
+  (jd.toLowerCase().match(/[a-z][a-z0-9+#./-]{2,}/g) || []).forEach((w) => {
+    const c = w.replace(/^[./-]+|[./-]+$/g, "");
+    if (c.length < 3 || STOPWORDS.has(c)) return;
+    freq[c] = (freq[c] || 0) + 1;
+  });
+  // boost known skill phrases appearing in JD
+  state.skillGroups.forEach((g) => (g.keywords || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).forEach((k) => {
+    if (k.length > 2 && jd.toLowerCase().includes(k)) freq[k] = (freq[k] || 0) + 3;
+  }));
+  return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 40).map((e) => e[0]);
+}
+function jdResult() {
+  const jd = (state.jdText || "").trim();
+  if (jd.length < 40) return null;
+  const corpus = resumeCorpus();
+  const kws = extractJdKeywords(jd);
+  const matched = kws.filter((k) => corpus.includes(k));
+  const missing = kws.filter((k) => !corpus.includes(k));
+  const score = kws.length ? Math.round((matched.length / kws.length) * 100) : 0;
+  return { score, matched: matched.slice(0, 20), missing: missing.slice(0, 20), total: kws.length };
+}
 
 /* ---------- validation for import ---------- */
 function validateResumeFile(obj) {
   if (!obj || typeof obj !== "object") return "Not a JSON object.";
-  if (obj.version !== 1 && !(obj.data && obj.data.version !== undefined)) {
-    // accept both {version,data} envelope and raw state
-  }
   const data = obj.data && typeof obj.data === "object" ? obj.data : obj;
   if (!data.contact && !data.experience && !data.summary && !data.skillGroups) return "Missing resume fields (contact/experience/summary).";
   if (data.experience && !Array.isArray(data.experience)) return "'experience' must be an array.";
@@ -118,7 +241,6 @@ function allSections() {
   const customs = state.customSections.map((c) => ({ id: "custom_" + c.id, label: c.title || "Custom section" }));
   const fixed = SECTION_DEFS.map((d) => ({ ...d }));
   const order = state.sectionOrder.filter((id) => fixed.some((f) => f.id === id) || id.startsWith("custom_"));
-  // append any missing
   fixed.forEach((f) => { if (!order.includes(f.id)) order.push(f.id); });
   customs.forEach((c) => { if (!order.includes(c.id)) order.push(c.id); });
   return { order, fixed, customs };
@@ -149,14 +271,40 @@ function fmtDate(v) {
   return v;
 }
 function dateRange(s, e, cur) { const a = fmtDate(s); const b = cur ? "Present" : fmtDate(e); return [a, b].filter(Boolean).join(" – "); }
+function redact(v, kind) {
+  if (!state.settings.redactPII) return v;
+  if (!v) return "";
+  if (kind === "email") return "[email redacted]";
+  if (kind === "phone") return "[phone redacted]";
+  if (kind === "loc") return "[location redacted]";
+  return v;
+}
 
 /* ================= EDITOR ================= */
 function renderEditor() {
   const ed = $("#editor");
+  if (!ed) return;
   const { order } = allSections();
   const visibleCount = order.filter(sectionVisible).length;
+  const jd = jdResult();
 
   ed.innerHTML = `
+  <div class="card">
+    <h2>Profile <span class="tag">${esc(meta.profiles.length)} saved</span></h2>
+    <div class="profile-row">
+      <select id="profile-select" aria-label="Active resume profile">
+        ${meta.profiles.map((p) => `<option value="${esc(p.id)}" ${p.id === meta.activeId ? "selected" : ""}>${esc(p.name)}</option>`).join("")}
+      </select>
+    </div>
+    <label>Rename profile<input id="profile-name" value="${esc(state.profileName || "")}" maxlength="60" /></label>
+    <div class="mini-btns" style="margin-top:6px">
+      <button type="button" data-act="prof-new">+ New</button>
+      <button type="button" data-act="prof-dup">Duplicate</button>
+      <button type="button" data-act="prof-del">Delete</button>
+    </div>
+    <p class="hint">Each profile autosaves separately. JSON export/import applies to the active profile.</p>
+  </div>
+
   <div class="card">
     <h2>Sections <span class="tag">${visibleCount}/${order.length} visible</span></h2>
     <p class="hint">Toggle any section on/off. Hidden sections never appear in preview or print. Arrows reorder.</p>
@@ -178,7 +326,18 @@ function renderEditor() {
   </div>
 
   <div class="card">
+    <h2>Tailor to job posting <span class="tag">local only</span></h2>
+    <p class="hint">Paste a job description. Matching is client-side; nothing is uploaded.</p>
+    <label for="jd-text">Job description<textarea id="jd-text" rows="5" placeholder="Paste the job ad here…">${esc(state.jdText || "")}</textarea></label>
+    ${jd ? `<div><span class="jd-score">Match: ${jd.score}%</span> <span class="hint">(${jd.matched.length}/${jd.total} top keywords found)</span></div>
+      <div class="jd-pills">${jd.matched.map((k) => `<span class="hit">✓ ${esc(k)}</span>`).join("")}</div>
+      ${jd.missing.length ? `<p class="hint">Missing — consider adding naturally if true:</p><div class="jd-pills">${jd.missing.map((k) => `<span class="miss">${esc(k)}</span>`).join("")}</div>` : `<p class="hint">No missing top keywords. Strong coverage.</p>`}`
+    : `<p class="hint">Paste 40+ characters to see a keyword match score.</p>`}
+  </div>
+
+  <div class="card">
     <h2>Contact / Header</h2>
+    ${state.settings.redactPII ? `<p class="hint">Redact PII is ON — email/phone/location show as redacted in preview + exports.</p>` : ``}
     <label>Full name<input data-f="contact.fullName" value="${esc(state.contact.fullName)}" placeholder="Jordan Lee" /></label>
     <label>Job title<input data-f="contact.title" value="${esc(state.contact.title)}" placeholder="Product Designer" /></label>
     <div class="row2">
@@ -196,6 +355,7 @@ function renderEditor() {
   <div class="card" ${sectionVisible("summary") ? "" : "hidden"}>
     <h2>Summary</h2>
     <label>Brief (2–3 lines)<textarea data-f="summary" placeholder="Years of experience, stack, 1–2 quantified wins…">${esc(state.summary)}</textarea></label>
+    <div class="coach ${state.summary.trim().length > 40 ? "good" : ""}">${state.summary.trim().length < 40 ? "Tip: aim for 40–400 characters with 1–2 metrics." : `✓ ${state.summary.trim().length} characters.`}</div>
   </div>
 
   <div class="card" ${sectionVisible("experience") ? "" : "hidden"}>
@@ -221,6 +381,7 @@ function renderEditor() {
         </div>
         <label class="check"><input type="checkbox" data-jc="current" data-i="${i}" ${j.current ? "checked" : ""} /> Currently work here</label>
         <label>Achievements (one per line)<textarea data-jb="${i}" rows="4">${esc((j.bullets || []).join("\n"))}</textarea></label>
+        ${coachForBullets(j.bullets)}
         <div class="mini-btns">
           <button type="button" data-act="job-break" data-i="${i}">${j.breakBefore ? "⤓ Page break before: ON" : "⤓ Page break before: off"}</button>
           <button type="button" data-act="job-hide" data-i="${i}">${j.hidden ? "👁 Unhide in output" : "🚫 Hide from output"}</button>
@@ -264,6 +425,7 @@ function renderEditor() {
         <label>Link<input data-pr="link" data-i="${i}" value="${esc(p.link)}" /></label></div>
         <label>Tech<input data-pr="tech" data-i="${i}" value="${esc(p.tech || "")}" /></label>
         <label>Bullets (one per line)<textarea data-prb="${i}">${esc((p.bullets || []).join("\n"))}</textarea></label>
+        ${coachForBullets(p.bullets)}
         <div class="mini-btns"><button type="button" data-act="proj-break" data-i="${i}">${p.breakBefore ? "⤓ Break before: ON" : "⤓ Break before: off"}</button>
         <button type="button" data-act="proj-hide" data-i="${i}">${p.hidden ? "👁 Unhide" : "🚫 Hide"}</button></div>
       </div>`).join("") || `<p class="hint">No projects.</p>`}
@@ -293,15 +455,41 @@ function renderEditor() {
     <div class="mini-btns"><button type="button" data-act="custom-break" data-i="${i}">${c.breakBefore ? "⤓ Break before: ON" : "⤓ Break before: off"}</button>
     <button type="button" data-act="custom-hide" data-i="${i}">${c.hidden ? "👁 Unhide" : "🚫 Hide from output"}</button></div>
   </div>`).join("")}
+
+  <div class="card">
+    <h2>Privacy</h2>
+    <p class="hint">All data stays in this browser (<code>localStorage</code>). JSON/PDF/TXT exports are files you control — nothing is uploaded to any server.</p>
+    <div class="mini-btns">
+      <button type="button" data-act="privacy-redact">${state.settings.redactPII ? "Show PII" : "Redact PII for sharing"}</button>
+      <button type="button" data-act="privacy-erase">Erase ALL local data</button>
+    </div>
+  </div>
   `;
-  syncPreviewControls();
+  const jdEl = $("#jd-text");
+  if (jdEl) {
+    jdEl.addEventListener("input", (e) => { state.jdText = e.target.value; persist(); renderPreview(); debounceJd(); });
+  }
+  const ps = $("#profile-select");
+  if (ps) ps.addEventListener("change", (e) => switchProfile(e.target.value));
+  const pn = $("#profile-name");
+  if (pn) pn.addEventListener("input", (e) => { state.profileName = e.target.value; persist(); touchMeta(); refreshProfileSelect(); });
+  syncPreviewControls(); syncHistButtons();
 }
+let jdTimer = null;
+function debounceJd() { clearTimeout(jdTimer); jdTimer = setTimeout(() => renderEditor(), 900); }
 
 /* ---------- editor events (delegation) ---------- */
 function bindEditor() {
   const ed = $("#editor");
+  if (!ed) return;
+  ed.addEventListener("focusin", () => { pendingPreEdit = JSON.stringify(state); });
   ed.addEventListener("input", (e) => {
     const t = e.target;
+    if (t.id === "jd-text" || t.id === "profile-select" || t.id === "profile-name") return; // handled separately
+    if (pendingPreEdit) {
+      const snap = pendingPreEdit; pendingPreEdit = null;
+      if (histPast.length === 0 || histPast[histPast.length - 1] !== snap) { histPast.push(snap); if (histPast.length > HIST_MAX) histPast.shift(); histFuture = []; syncHistButtons(); }
+    }
     if (t.dataset.f) {
       const parts = t.dataset.f.split(".");
       if (parts.length === 2) state[parts[0]][parts[1]] = t.value;
@@ -317,18 +505,35 @@ function bindEditor() {
     else if (t.hasAttribute("data-prb")) { state.projects[+t.dataset.prb].bullets = t.value.split("\n").map((s) => s.trim()).filter(Boolean); persist(); renderPreview(); }
     else if (t.dataset.ce) { state.certifications[i][t.dataset.ce] = t.value; persist(); renderPreview(); }
     else if (t.dataset.la) { state.languages[i][t.dataset.la] = t.value; persist(); renderPreview(); }
-    else if (t.dataset.cu) { state.customSections[i][t.dataset.cu] = t.value; persist(); renderEditor(); renderPreview(); }
+    else if (t.dataset.cu) { state.customSections[i][t.dataset.cu] = t.value; persist(); renderPreview(); }
     else if (t.hasAttribute("data-cub")) { state.customSections[+t.dataset.cub].bullets = t.value.split("\n").map((s) => s.trim()).filter(Boolean); persist(); renderPreview(); }
   });
   ed.addEventListener("change", (e) => {
     const t = e.target; const i = +(t.dataset.i ?? -1);
-    if (t.dataset.jc === "current") { state.experience[i].current = t.checked; if (t.checked) state.experience[i].end = ""; persist(); renderEditor(); renderPreview(); }
+    if (t.dataset.jc === "current") { pushHistory(); state.experience[i].current = t.checked; if (t.checked) state.experience[i].end = ""; persist(); renderEditor(); renderPreview(); }
   });
   ed.addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]"); if (!b) return;
     const act = b.dataset.act; const i = +(b.dataset.i ?? -1); const id = b.dataset.id;
+    const structural = !["privacy-erase"].includes(act);
+    if (structural) pushHistory();
     const R = () => { persist(); renderEditor(); renderPreview(); };
-    if (act === "sec-eye") {
+    if (act === "prof-new") {
+      const nid = uid(); meta.profiles.push({ id: nid, name: "Untitled resume", updatedAt: Date.now() }); meta.activeId = nid;
+      state = defaultState(); state.profileName = "Untitled resume"; saveMeta(meta); histPast = []; histFuture = []; persist(true); renderEditor(); renderPreview();
+    } else if (act === "prof-dup") {
+      const nid = uid(); const c = clone(state); c.profileName = (state.profileName || "Resume") + " (copy)"; c.isExample = false;
+      meta.profiles.push({ id: nid, name: c.profileName, updatedAt: Date.now() }); meta.activeId = nid; state = c;
+      saveMeta(meta); try { localStorage.setItem(stateKey(nid), JSON.stringify(c)); } catch {}
+      histPast = []; histFuture = []; persist(true); renderEditor(); renderPreview(); toast("Profile duplicated");
+    } else if (act === "prof-del") {
+      if (meta.profiles.length <= 1) return toast("Cannot delete the only profile");
+      if (!confirm("Delete profile '" + (state.profileName || "") + "'? This cannot be undone.")) { histPast.pop(); syncHistButtons(); return; }
+      try { localStorage.removeItem(stateKey(meta.activeId)); } catch {}
+      meta.profiles = meta.profiles.filter((p) => p.id !== meta.activeId);
+      meta.activeId = meta.profiles[0].id; saveMeta(meta);
+      state = loadProfileState(meta.activeId); histPast = []; histFuture = []; persist(true); renderEditor(); renderPreview();
+    } else if (act === "sec-eye") {
       if (id.startsWith("custom_")) { const c = state.customSections.find((x) => "custom_" + x.id === id); if (c) c.hidden = !c.hidden; }
       else state.sectionsVisible[id] = !state.sectionsVisible[id];
       R();
@@ -363,12 +568,30 @@ function bindEditor() {
     else if (act === "custom-del") { const [c] = state.customSections.splice(i, 1); state.sectionOrder = state.sectionOrder.filter((x) => x !== "custom_" + (c && c.id)); R(); }
     else if (act === "custom-break") { state.customSections[i].breakBefore = !state.customSections[i].breakBefore; R(); }
     else if (act === "custom-hide") { state.customSections[i].hidden = !state.customSections[i].hidden; R(); }
+    else if (act === "privacy-redact") { state.settings.redactPII = !state.settings.redactPII; R(); toast(state.settings.redactPII ? "PII redacted in outputs" : "PII visible"); }
+    else if (act === "privacy-erase") {
+      if (!confirm("Erase ALL profiles and local data? This cannot be undone.")) return;
+      try { meta.profiles.forEach((p) => localStorage.removeItem(stateKey(p.id))); localStorage.removeItem(LS_KEY); localStorage.removeItem(BACKUP_KEY); localStorage.removeItem(PROFILES_KEY); } catch {}
+      location.reload();
+    }
   });
+}
+function switchProfile(id) {
+  if (!meta.profiles.some((p) => p.id === id) || id === meta.activeId) return;
+  persist(true);
+  meta.activeId = id; saveMeta(meta);
+  state = loadProfileState(id); histPast = []; histFuture = [];
+  persist(true); renderEditor(); renderPreview(); toast("Switched profile");
+}
+function refreshProfileSelect() {
+  const sel = $("#profile-select"); if (!sel) return;
+  sel.innerHTML = meta.profiles.map((p) => `<option value="${esc(p.id)}" ${p.id === meta.activeId ? "selected" : ""}>${esc(p.name)}</option>`).join("");
 }
 
 /* ================= TEMPLATES ================= */
 function contactLine(c) {
-  return [c.email, c.phone, c.location, c.linkedin, c.github, c.portfolio].filter(Boolean).map(esc).join(" &nbsp;•&nbsp; ");
+  const parts = [redact(c.email, "email"), redact(c.phone, "phone"), redact(c.location, "loc"), c.linkedin, c.github, c.portfolio].filter(Boolean).map(esc);
+  return parts.join(" &nbsp;•&nbsp; ");
 }
 function breakHtml() { return `<div class="pb-indicator"></div>`; }
 
@@ -436,11 +659,12 @@ function sectionHtml(id, pills) {
 
 function renderPreview() {
   const sheet = $("#sheet");
+  if (!sheet) return;
   const tpl = state.settings.templateId || "ats";
   sheet.className = `sheet tpl-${tpl} fs-${state.settings.fontSize} mg-${state.settings.margins}`;
   sheet.style.setProperty("--accent", state.settings.accent || "#1d4ed8");
   const c = state.contact;
-  const name = esc(c.fullName || "Your Name");
+  const name = esc(redact(c.fullName, "") || "Your Name");
   const title = esc(c.title || "");
   const cline = contactLine(c);
   const { order } = allSections();
@@ -462,6 +686,78 @@ function renderPreview() {
     <style>.sheet{counter-reset:pg}.pb-indicator{counter-increment:pg}.pnum::after{content:counter(pg)}</style>` : "";
   sheet.innerHTML = body + footer;
   syncPreviewControls();
+  updatePageEstimate();
+}
+
+/* ---- page overflow guard ---- */
+function updatePageEstimate() {
+  requestAnimationFrame(() => {
+    const sheet = $("#sheet"), el = $("#page-est");
+    if (!sheet || !el) return;
+    const w = sheet.clientWidth || 1;
+    const pagePx = (w * 297) / 210;
+    const pages = sheet.scrollHeight / pagePx;
+    const manual = (sheet.innerHTML.match(/pb-indicator/g) || []).length;
+    let msg = `Est. ${pages.toFixed(1)} A4 page${pages >= 1.5 ? "s" : ""} (${manual} manual break${manual === 1 ? "" : "s"})`;
+    if (pages > 2.05) msg += " — over 2 pages: trim or add a break";
+    else if (pages > 1.05 && pages < 1.25) msg += " — awkward 1.2 pages: trim a little or force 2 clean pages";
+    el.textContent = msg;
+    el.className = pages > 2.05 ? "over" : pages > 1.05 && pages < 1.25 ? "warn" : "";
+    el.id = "page-est";
+  });
+}
+
+/* ================= PLAIN TEXT (ATS .txt) ================= */
+function resumeToText() {
+  const L = [];
+  const c = state.contact;
+  L.push(c.fullName || "Your Name");
+  if (c.title) L.push(c.title);
+  L.push([redact(c.email, "email"), redact(c.phone, "phone"), redact(c.location, "loc"), c.linkedin, c.github, c.portfolio].filter(Boolean).join(" | "));
+  L.push("");
+  const { order } = allSections();
+  const pushBullets = (arr) => arr.forEach((b) => L.push("- " + b));
+  order.forEach((id) => {
+    if (!sectionVisible(id) || isSectionEmpty(id)) return;
+    if (id === "summary") { L.push("SUMMARY"); L.push(state.summary); L.push(""); }
+    else if (id === "experience") {
+      L.push("EXPERIENCE");
+      state.experience.filter((j) => !j.hidden).forEach((j) => {
+        L.push(`${j.title || "Role"} — ${j.company || ""} (${dateRange(j.start, j.end, j.current)})`);
+        if (j.location) L.push(j.location);
+        pushBullets(j.bullets || []); L.push("");
+      });
+    }
+    else if (id === "skills") {
+      L.push("SKILLS");
+      if (state.skillsBrief.trim()) L.push(state.skillsBrief.trim());
+      state.skillGroups.forEach((g) => { if (g.label || g.keywords) L.push(`${g.label}: ${g.keywords}`); });
+      L.push("");
+    }
+    else if (id === "education") {
+      L.push("EDUCATION");
+      state.education.filter((e) => !e.hidden).forEach((e) => {
+        L.push(`${e.school} — ${[e.degree, e.field].filter(Boolean).join(", ")} ${[e.start, e.end].filter(Boolean).join("-")}`);
+        if (e.details) L.push(e.details);
+      });
+      L.push("");
+    }
+    else if (id === "projects") {
+      L.push("PROJECTS");
+      state.projects.filter((p) => !p.hidden).forEach((p) => {
+        L.push(`${p.name}${p.link ? " — " + p.link : ""}${p.tech ? " [" + p.tech + "]" : ""}`);
+        pushBullets(p.bullets || []);
+      });
+      L.push("");
+    }
+    else if (id === "certifications") { L.push("CERTIFICATIONS"); state.certifications.forEach((x) => L.push(`- ${x.name}${x.issuer ? " — " + x.issuer : ""}${x.year ? " (" + x.year + ")" : ""}`)); L.push(""); }
+    else if (id === "languages") { L.push("LANGUAGES"); L.push(state.languages.map((l) => l.lang + (l.level ? ` (${l.level})` : "")).join(", ")); L.push(""); }
+    else if (id.startsWith("custom_")) {
+      const cu = state.customSections.find((x) => "custom_" + x.id === id);
+      if (cu && !cu.hidden) { L.push((cu.title || "Additional").toUpperCase()); pushBullets(cu.bullets || []); L.push(""); }
+    }
+  });
+  return L.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
 }
 
 function syncPreviewControls() {
@@ -470,13 +766,15 @@ function syncPreviewControls() {
   const mg = $("#set-margins"); if (mg) mg.value = state.settings.margins;
   const ac = $("#set-accent"); if (ac) ac.value = state.settings.accent;
   const pn = $("#set-pagenum"); if (pn) pn.checked = !!state.settings.showPageNumbers;
+  const rd = $("#set-redact"); if (rd) rd.checked = !!state.settings.redactPII;
   const eb = $("#example-banner"); if (eb) eb.hidden = !state.isExample;
   const ub = $("#btn-undo"); if (ub) ub.disabled = !hasBackup();
+  syncHistButtons(); refreshProfileSelect();
 }
 
 /* ================= TOOLBAR / IO ================= */
 function toast(msg, ms) {
-  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  const t = $("#toast"); if (!t) return; t.textContent = msg; t.classList.add("show");
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms || 2400);
 }
 function download(filename, text, type) {
@@ -485,27 +783,80 @@ function download(filename, text, type) {
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 function exportFilename(ext) {
-  const n = (state.contact.fullName || "resume").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "resume";
+  const base = state.profileName || state.contact.fullName || "resume";
+  const n = base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "resume";
   const d = new Date().toISOString().slice(0, 10);
   return `${n}-${d}.${ext}`;
 }
 function doExportJSON() {
   persist(true);
-  download(exportFilename("json"), JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: state }, null, 2));
+  download(exportFilename("json"), JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), profile: state.profileName, data: state }, null, 2));
   toast("Saved .json file");
 }
-function doCopyJSON() {
-  const s = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: state }, null, 2);
-  (navigator.clipboard ? navigator.clipboard.writeText(s) : Promise.reject()).then(() => toast("JSON copied"), () => toast("Copy failed"));
+/* ================= JSON VIEW (Resume | JSON toggle) ================= */
+let activeView = "resume";
+function currentEnvelope() {
+  return { version: 1, exportedAt: new Date().toISOString(), profile: state.profileName, data: state };
+}
+function refreshJsonView() {
+  const ta = $("#json-view-text"); if (!ta) return;
+  ta.value = JSON.stringify(currentEnvelope(), null, 2);
+  hideJsonViewError();
+}
+function showJsonViewError(msg) {
+  const el = $("#json-view-error"); if (!el) return;
+  el.textContent = msg; el.hidden = false;
+}
+function hideJsonViewError() {
+  const el = $("#json-view-error"); if (!el) return;
+  el.hidden = true; el.textContent = "";
+}
+function setView(v) {
+  activeView = v;
+  $$(".view-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
+  const sheet = $("#sheet"), jv = $("#json-view");
+  if (sheet) sheet.hidden = v !== "resume";
+  if (jv) jv.hidden = v !== "json";
+  if (v === "json") refreshJsonView();
+  if (v === "resume") renderPreview();
+}
+function applyJsonView() {
+  const ta = $("#json-view-text"); if (!ta) return;
+  let obj;
+  try { obj = JSON.parse(ta.value); }
+  catch (e) { showJsonViewError("Invalid JSON: " + e.message); return; }
+  const err = validateResumeFile(obj);
+  if (err) { showJsonViewError("Invalid resume JSON: " + err); return; }
+  pushHistory(); backupCurrent();
+  const keep = state.profileName;
+  state = normalizeImport(obj);
+  state.profileName = keep;
+  hideJsonViewError();
+  persist(true); renderEditor(); renderPreview(); refreshJsonView();
+  toast("JSON applied (Undo available)");
+}
+function bindJsonView() {
+  $$(".view-btn").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+  const ap = $("#json-view-apply"); if (ap) ap.addEventListener("click", applyJsonView);
+  const rs = $("#json-view-reset"); if (rs) rs.addEventListener("click", () => { refreshJsonView(); toast("JSON reset to current"); });
+  const cp = $("#json-view-copy"); if (cp) cp.addEventListener("click", () => {
+    const ta = $("#json-view-text"); if (!ta) return;
+    (navigator.clipboard ? navigator.clipboard.writeText(ta.value) : Promise.reject()).then(() => toast("JSON copied"), () => { ta.focus(); ta.select(); toast("Press Ctrl+C to copy"); });
+  });
+  const ta = $("#json-view-text");
+  if (ta) ta.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); applyJsonView(); }
+  });
 }
 function requestReplace(newState, label) {
   const jobs = (newState.experience || []).length;
-  const ok = confirm(`${label}\n\nThis REPLACES your current resume (no merge).\nIncoming: ${newState.contact?.fullName || "Untitled"} — ${jobs} job(s).\n\nA backup is kept for Undo. Continue?`);
+  const ok = confirm(`${label}\n\nThis REPLACES the active profile (no merge).\nIncoming: ${newState.contact?.fullName || "Untitled"} — ${jobs} job(s).\n\nA backup is kept for Undo. Continue?`);
   if (!ok) return;
-  backupCurrent();
+  pushHistory(); backupCurrent();
+  newState.profileName = state.profileName;
   state = newState; state.isExample = !!newState.isExample;
   persist(true); renderEditor(); renderPreview();
-  toast("Replaced current resume (Undo available)");
+  toast("Replaced active profile (Undo available)");
 }
 function doImportFile(file) {
   if (!file) return;
@@ -523,7 +874,6 @@ function doImportFile(file) {
 }
 function standaloneHtml() {
   renderPreview();
-  const css = document.querySelector('link[rel="stylesheet"]') ? "" : "";
   const sheetHtml = $("#sheet").outerHTML;
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Resume — ${esc(state.contact.fullName || "resume")}</title>
 <style>
@@ -536,35 +886,77 @@ body{font-family:Arial,sans-serif;margin:0;background:#fff;color:#111}
 ul{margin:4px 0 0 18px}
 </style></head><body>${sheetHtml}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`;
 }
+function ensureHtml2Pdf() {
+  if (window.html2pdf) return Promise.resolve();
+  toast("Loading PDF engine…");
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+    s.onload = resolve; s.onerror = () => reject(new Error("cdn"));
+    document.head.appendChild(s);
+  });
+}
+function doQuickPdf() {
+  const sheet = $("#sheet");
+  ensureHtml2Pdf().then(() => {
+    toast("Generating PDF… (beta: rasterized — use Print/PDF for selectable text)");
+    const opt = { margin: 0, filename: exportFilename("pdf"), image: { type: "jpeg", quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: "mm", format: "a4", orientation: "portrait" } };
+    try { window.html2pdf().set(opt).from(sheet).save().catch(() => toast("PDF failed — use Print / PDF instead", 3000)); }
+    catch { toast("PDF failed — use Print / PDF instead", 3000); }
+  }).catch(() => toast("PDF engine needs network — use Print / PDF instead", 3500));
+}
 function bindToolbar() {
   $$(".tpl-btn").forEach((b) => b.addEventListener("click", () => { state.settings.templateId = b.dataset.tpl; persist(); renderPreview(); }));
-  $("#set-fontsize").addEventListener("change", (e) => { state.settings.fontSize = e.target.value; persist(); renderPreview(); });
-  $("#set-margins").addEventListener("change", (e) => { state.settings.margins = e.target.value; persist(); renderPreview(); });
-  $("#set-accent").addEventListener("input", (e) => { state.settings.accent = e.target.value; persist(); renderPreview(); });
-  $("#set-pagenum").addEventListener("change", (e) => { state.settings.showPageNumbers = e.target.checked; persist(); renderPreview(); });
-  $("#btn-print").addEventListener("click", () => { persist(true); window.print(); });
-  $("#btn-export-json").addEventListener("click", doExportJSON);
-  $("#btn-copy-json").addEventListener("click", doCopyJSON);
-  $("#btn-export-html").addEventListener("click", () => { download(exportFilename("html"), standaloneHtml(), "text/html"); toast("Exported printable .html"); });
-  $("#btn-new").addEventListener("click", () => {
-    if (!confirm("Start fresh? This REPLACES your current resume (backup kept for Undo).")) return;
-    backupCurrent(); state = defaultState(); persist(true); renderEditor(); renderPreview(); toast("Started fresh");
+  const fz = $("#set-fontsize"); if (fz) fz.addEventListener("change", (e) => { state.settings.fontSize = e.target.value; persist(); renderPreview(); });
+  const mg = $("#set-margins"); if (mg) mg.addEventListener("change", (e) => { state.settings.margins = e.target.value; persist(); renderPreview(); });
+  const ac = $("#set-accent"); if (ac) ac.addEventListener("input", (e) => { state.settings.accent = e.target.value; persist(); renderPreview(); });
+  const pn = $("#set-pagenum"); if (pn) pn.addEventListener("change", (e) => { state.settings.showPageNumbers = e.target.checked; persist(); renderPreview(); });
+  const rd = $("#set-redact"); if (rd) rd.addEventListener("change", (e) => { pushHistory(); state.settings.redactPII = e.target.checked; persist(); renderEditor(); renderPreview(); });
+  const bp = $("#btn-print"); if (bp) bp.addEventListener("click", () => { persist(true); window.print(); });
+  const be = $("#btn-export-json"); if (be) be.addEventListener("click", doExportJSON);
+  const bh = $("#btn-export-html"); if (bh) bh.addEventListener("click", () => { download(exportFilename("html"), standaloneHtml(), "text/html"); toast("Exported printable .html"); });
+  const bt = $("#btn-export-txt"); if (bt) bt.addEventListener("click", () => { download(exportFilename("txt"), resumeToText(), "text/plain"); toast("Exported plain-text .txt"); });
+  const bq = $("#btn-quick-pdf"); if (bq) bq.addEventListener("click", doQuickPdf);
+  const bn = $("#btn-new"); if (bn) bn.addEventListener("click", () => {
+    if (!confirm("Clear the active profile? (backup kept for Undo)")) return;
+    pushHistory(); backupCurrent(); const keep = state.profileName; state = defaultState(); state.profileName = keep; persist(true); renderEditor(); renderPreview(); toast("Cleared active profile");
   });
-  $("#btn-example").addEventListener("click", () => requestReplace(sampleState(), "Load example resume?"));
-  $("#btn-undo").addEventListener("click", () => {
-    try { const raw = localStorage.getItem(BACKUP_KEY); if (!raw) return toast("No backup"); state = migrate(JSON.parse(raw)); persist(true); renderEditor(); renderPreview(); toast("Restored backup"); }
+  const bx = $("#btn-example"); if (bx) bx.addEventListener("click", () => requestReplace(sampleState(), "Load example resume?"));
+  const bu = $("#btn-undo"); if (bu) bu.addEventListener("click", () => {
+    try { const raw = localStorage.getItem(BACKUP_KEY); if (!raw) return toast("No backup"); pushHistory(); state = migrate(JSON.parse(raw)); persist(true); renderEditor(); renderPreview(); toast("Restored backup"); }
     catch { toast("Restore failed"); }
   });
-  $("#btn-import-json").addEventListener("click", () => $("#file-input").click());
-  $("#file-input").addEventListener("change", (e) => { doImportFile(e.target.files[0]); e.target.value = ""; });
+  const hu = $("#btn-hist-undo"); if (hu) hu.addEventListener("click", undoHistory);
+  const hr = $("#btn-hist-redo"); if (hr) hr.addEventListener("click", redoHistory);
+  const bi = $("#btn-import-json"); if (bi) bi.addEventListener("click", () => $("#file-input").click());
+  const fi = $("#file-input"); if (fi) fi.addEventListener("change", (e) => { doImportFile(e.target.files[0]); e.target.value = ""; });
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); doImportFile(e.dataTransfer.files[0]); } });
-  $("#btn-banner-fresh").addEventListener("click", () => { backupCurrent(); state = defaultState(); persist(true); renderEditor(); renderPreview(); });
-  $("#btn-banner-dismiss").addEventListener("click", () => { state.isExample = false; persist(); renderPreview(); });
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return; // let native undo work while typing
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undoHistory(); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) { e.preventDefault(); redoHistory(); }
+  });
+  const bf = $("#btn-banner-fresh"); if (bf) bf.addEventListener("click", () => { pushHistory(); backupCurrent(); const keep = state.profileName; state = defaultState(); state.profileName = keep; persist(true); renderEditor(); renderPreview(); });
+  const bd = $("#btn-banner-dismiss"); if (bd) bd.addEventListener("click", () => { state.isExample = false; persist(); renderPreview(); });
+  const te = $("#tab-edit"), tp = $("#tab-preview");
+  const setTab = (which) => {
+    document.body.classList.toggle("show-editor", which === "edit");
+    document.body.classList.toggle("show-preview", which === "preview");
+    if (te) te.classList.toggle("active", which === "edit");
+    if (tp) tp.classList.toggle("active", which === "preview");
+  };
+  if (te) te.addEventListener("click", () => setTab("edit"));
+  if (tp) tp.addEventListener("click", () => setTab("preview"));
+  document.body.classList.add("show-editor");
 }
 
-/* init */
+/* test hooks (used by test.html) */
+window.ResumeTest = { validateResumeFile, migrate, normalizeImport, lintBullet, extractJdKeywords, resumeToText, sampleState, defaultState, currentEnvelope, applyJsonView, setView, VERSION: 3 };
+
+/* init (skipped when loaded by test.html which has no editor/sheet) */
 (function init() {
-  if (!localStorage.getItem(LS_KEY)) { state = sampleState(); persist(true); }
-  bindEditor(); bindToolbar(); renderEditor(); renderPreview();
+  if (!document.getElementById("editor") || !document.getElementById("sheet")) return;
+  bindEditor(); bindToolbar(); bindJsonView(); renderEditor(); renderPreview();
 })();

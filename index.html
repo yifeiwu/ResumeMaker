@@ -8,17 +8,17 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<a class="skip no-print" href="#sheet">Skip to preview</a>
+<a class="skip no-print" href="#preview-scroll">Skip to preview</a>
 <header class="topbar no-print">
   <div class="brand">
     <strong>Resume Builder</strong>
-    <span class="muted" id="save-status" role="status">saved</span>
+    <span class="muted" id="save-status">saved</span>
   </div>
   <nav class="mobile-tabs" aria-label="Switch panes">
-    <button id="tab-edit" type="button" class="active">Edit</button>
-    <button id="tab-preview" type="button">Preview</button>
+    <button id="tab-edit" type="button" class="active" aria-pressed="true">Edit</button>
+    <button id="tab-preview" type="button" aria-pressed="false">Preview</button>
   </nav>
-  <div class="toolbar" role="toolbar" aria-label="Resume actions">
+  <div class="toolbar" role="group" aria-label="Resume actions">
     <button id="btn-example" type="button" title="Load example resume (replaces current)">Load example</button>
     <button id="btn-new" type="button" title="Start fresh (clears all)">New / Clear</button>
     <span class="sep"></span>
@@ -57,8 +57,8 @@
         <button type="button" data-tpl="sidebar" class="tpl-btn" title="Sidebar Pro: two-column">Sidebar</button>
       </div>
       <div class="view-picker" role="group" aria-label="Preview view">
-        <button type="button" data-view="resume" class="view-btn active" title="Show the resume preview">Resume</button>
-        <button type="button" data-view="json" class="view-btn" title="Show editable JSON for the active profile">JSON</button>
+        <button type="button" data-view="resume" class="view-btn active" aria-pressed="true" title="Show the resume preview">Resume</button>
+        <button type="button" data-view="json" class="view-btn" aria-pressed="false" title="Show editable JSON for the current resume">JSON</button>
       </div>
       <div class="preview-settings">
         <label for="set-fontsize">Font <select id="set-fontsize">
@@ -68,17 +68,18 @@
           <option value="narrow">Narrow</option><option value="normal" selected>Normal</option><option value="wide">Wide</option>
         </select></label>
         <label for="set-accent">Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
-        <label class="check"><input type="checkbox" id="set-pagenum" checked /> Page #</label>
+        <label class="check" title="Print footer with your name and title. For page numbers enable your browser's own header/footer in the print dialog."><input type="checkbox" id="set-pagenum" checked /> Footer</label>
         <label class="check" title="Hide email/phone/location in preview + exports"><input type="checkbox" id="set-redact" /> Redact PII</label>
       </div>
     </div>
     <p class="preview-hint no-print"><span id="page-est">Est. — pages</span> · Dashed lines = manual page breaks (print to 1–2 A4 pages via <strong>Print / PDF</strong>). Hidden/empty sections never print. <span class="muted">Data stays in your browser — nothing is uploaded.</span></p>
-    <div id="preview-scroll" class="preview-scroll">
+    <div id="preview-scroll" class="preview-scroll" tabindex="-1">
       <div id="sheet" class="sheet"></div>
       <div id="json-view" class="json-view" hidden>
-        <p class="hint">Editable JSON snapshot of the active profile — captured when you opened this view. Edit, then <strong>Apply</strong> (Ctrl+Enter). Invalid content never wipes your work; errors appear below.</p>
+        <p class="hint">Editable snapshot of the current resume. Apply with <strong>Apply</strong> or <strong>Ctrl+Enter</strong>. Invalid content never wipes your work.</p>
         <label for="json-view-text">Resume JSON</label>
         <textarea id="json-view-text" spellcheck="false" autocomplete="off"></textarea>
+        <p id="json-stale" class="json-stale" hidden>Heads up: the resume changed elsewhere since this snapshot was taken. <strong>Reset to current</strong> refreshes it, or keep your edits and Apply (newer changes are discarded but Undo-able).</p>
         <div id="json-view-error" class="json-error" role="alert" hidden></div>
         <div class="mini-btns json-view-btns">
           <button id="json-view-apply" type="button" class="primary">Apply</button>

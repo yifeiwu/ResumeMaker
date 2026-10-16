@@ -82,6 +82,23 @@ t("JD score weights requirement lines higher", () => {
   ok(jd.missing.includes("rust"), "rust should be missing from the sample resume");
   ok(jd.score > 0 && jd.score < 100, "score looks wrong: " + jd.score);
 });
+t("JD matcher matches short terms on whole words only", () => {
+  R().setState(R().defaultState());
+  R().getState().summary = "Good team player with MongoDB experience.";
+  R().getState().jdText = "Requirements:\nGolang expertise needed for this backend role, plus React skills";
+  const jd = R().jdResult();
+  ok(jd && jd.total > 0, "no keywords");
+  ok(jd.missing.includes("go"), "go should be missing: only Good/MongoDB substrings present");
+  R().getState().summary = "Go development for backend services.";
+  ok(R().jdResult().matched.includes("go"), "standalone Go should match golang");
+});
+t("export filenames fall back cleanly for symbol-only names", () => {
+  R().setState(R().sampleState());
+  R().getState().contact.fullName = "!!!";
+  ok(R().exportFilename("json").indexOf("resume-") === 0, "symbol-only name left stray dashes: " + R().exportFilename("json"));
+  R().getState().contact.fullName = "Yi Fei Wu";
+  ok(R().exportFilename("pdf").indexOf("yi-fei-wu-") === 0, "name slug broken");
+});
 t("plain-text export reflects state, hides and redaction", () => {
   R().setState(R().sampleState());
   R().getState().experience[0].hidden = true;
@@ -94,7 +111,10 @@ t("plain-text export reflects state, hides and redaction", () => {
   R().getState().settings.redactPII = true;
   txt = R().resumeToText();
   no(txt.includes("alex.morgan@example.com"), "email not redacted in txt");
-  ok(R().buildSheetHtml().includes("[email redacted]"), "email not redacted in sheet");
+  const sheet = R().buildSheetHtml();
+  no(sheet.includes("alex.morgan@example.com"), "email not redacted in sheet");
+  ok(sheet.includes("Alex Morgan"), "redaction should not remove the name");
+  no(/\[email redacted\]|\[phone redacted\]|\[location redacted\]/.test(sheet), "redaction left a placeholder");
 });
 t("sheet output honours visibility, breaks and print-only hints", () => {
   R().setState(R().sampleState());

@@ -28,21 +28,12 @@
     <button id="btn-hist-undo" type="button" title="Undo (Ctrl+Z)">Undo</button>
     <button id="btn-hist-redo" type="button" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled>Redo</button>
     <span class="sep"></span>
-    <button id="btn-export-html" type="button" title="Download standalone printable .html file">Export .html</button>
     <button id="btn-export-txt" type="button" title="Download plain-text ATS version">Export .txt</button>
-    <button id="btn-quick-pdf" type="button" title="One-click PDF via html2pdf. Single page only — for 2+ pages use Print / PDF (selectable text, exact A4).">Quick PDF</button>
+    <button id="btn-quick-pdf" type="button" title="One-click PDF of every A4 page. Rasterized, so text is not selectable - use Print / PDF for selectable text.">Quick PDF</button>
     <button id="btn-print" type="button" class="primary" title="Print / Save as PDF">Print / PDF</button>
   </div>
 </header>
 <input type="file" id="file-input" accept=".json,application/json" hidden />
-
-<div id="example-banner" class="banner no-print" hidden>
-  <span>Viewing the <strong>example resume</strong>. Edit freely, or start fresh.</span>
-  <span>
-    <button id="btn-banner-fresh" type="button">Start fresh</button>
-    <button id="btn-banner-dismiss" type="button">Keep editing</button>
-  </span>
-</div>
 
 <main class="layout">
   <!-- EDITOR -->
@@ -69,7 +60,7 @@
         </select></label>
         <label for="set-accent">Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
         <label class="check" title="Print footer with your name and an accurate Page X of Y on every page"><input type="checkbox" id="set-pagenum" checked /> Footer</label>
-        <label class="check" title="Hide email/phone/location in the preview, .html, .txt and Quick PDF. Save .json and the JSON view keep the real values."><input type="checkbox" id="set-redact" /> Redact PII</label>
+        <label class="check" title="Hide email/phone/location in the preview, .txt and Quick PDF. Save .json and the JSON view keep the real values."><input type="checkbox" id="set-redact" /> Redact PII</label>
       </div>
     </div>
     <p class="preview-hint no-print"><span id="page-est">— pages</span> · Each box below is one real A4 page — what you see is what prints. <span class="muted">Break markers are preview-only and never reach your PDF or exports.</span></p>

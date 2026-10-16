@@ -70,7 +70,7 @@ async function run() {
     say("profile UI removed", !/Profile/.test($("#editor").textContent));
     say("example resume auto-loaded", R.getState().contact.fullName === "Alex Morgan");
     say("sheet has content", $("#sheet").textContent.length > 400);
-    say("example banner shown", $("#example-banner").hidden === false);
+    say("the example banner is gone", !$("#example-banner") && !$("#btn-banner-dismiss"));
 
     // ---- A4 pagination -------------------------------------------------------
     const boxes = () => Array.from(d.querySelectorAll("#sheet .page"));
@@ -193,13 +193,6 @@ async function run() {
     w.HTMLAnchorElement.prototype.click = function () {};
     $('[data-view="json"]').click();
     say("json view re-opened", sheet.hidden === true);
-    $("#btn-export-html").click();
-    say("export html ignores json view", sheet.hidden === false);
-    $("#btn-export-html").click();
-    const htmlTxt = await captured.text();
-    say("export html keeps template css", htmlTxt.indexOf(".r-cols") > -1 && htmlTxt.indexOf("@page") > -1);
-    say("export html prints one box per page", htmlTxt.indexOf("break-after:page") > -1 && htmlTxt.indexOf('class="page"') > -1);
-    say("export html hides break markers", /pb-indicator[^{]*\{[^}]*display:none/.test(htmlTxt));
     $("#btn-export-txt").click();
     say("export txt produced a file", !!captured);
     const txt = await captured.text();
@@ -209,15 +202,16 @@ async function run() {
     say("json export keeps envelope shape", /"version"\s*:\s*1/.test(jsonTxt) && /"data"\s*:/.test(jsonTxt));
     say("json export has no dead profile field", jsonTxt.indexOf('"profileName"') === -1);
 
-    // ---- redaction scope is honest -------------------------------------------
+    // ---- redaction removes the values, no placeholders ------------------------
     $("#set-redact").click();
     flush();
     const redactSheet = $("#sheet").textContent;
     $("#btn-export-json").click();
     const redactJson = await captured.text();
-    info("redactPII=" + R.getState().settings.redactPII + " checkbox=" + $("#set-redact").checked +
-      " marker=" + (redactSheet.indexOf("[email redacted]") > -1) + " sheetLen=" + redactSheet.length);
     say("redaction hides email in preview", !/alex\.morgan@example\.com/.test(redactSheet));
+    say("redaction leaves no placeholder text", !/\[email redacted\]|\[phone redacted\]|\[location redacted\]/.test(redactSheet));
+    say("redaction still keeps the name and title", /Alex Morgan/.test(redactSheet) && /Senior Frontend Engineer/.test(redactSheet));
+    say("redacted contact line is not left with stray separators", !/&nbsp;•&nbsp;\s*&nbsp;•&nbsp;/.test($("#sheet").innerHTML));
     say("json export keeps real values (documented)", /alex\.morgan@example\.com/.test(redactJson));
     $("#set-redact").click();
     flush();

@@ -288,8 +288,12 @@ function jdResult() {
   const weights = jdWeights(jd);
   const kws = topKeywords(weights, 30);
   const corpus = resumeCorpus();
-  const has = (k) => corpus.includes(k) || corpus.includes(stem(k)) ||
-    Object.entries(SKILL_ALIASES).some(([a, b]) => (a === k ? corpus.includes(b) : b === k && corpus.includes(a)));
+  // short terms ("go" from golang, "ios", "vue", "api") must match whole words:
+  // substring matching would hit "mongodb", "good", "studios", "remove", "rapid"
+  const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const inCorpus = (t) => (t.length <= 3 ? new RegExp(`\\b${escRe(t)}\\b`).test(corpus) : corpus.includes(t));
+  const has = (k) => inCorpus(k) || inCorpus(stem(k)) ||
+    Object.entries(SKILL_ALIASES).some(([a, b]) => (a === k ? inCorpus(b) : b === k && inCorpus(a)));
   const matched = kws.filter(has);
   const missing = kws.filter((k) => !has(k));
   const total = kws.reduce((a, k) => a + weights[k], 0) || 1;
@@ -359,12 +363,11 @@ function fmtDate(v) {
 }
 function dateRange(s, e, cur) { return [fmtDate(s), cur ? "Present" : fmtDate(e)].filter(Boolean).join(" – "); }
 function dateSpan(s, e) { return [fmtDate(s), fmtDate(e)].filter(Boolean).join(" – "); }
+/* Redaction removes the value entirely - no placeholder text is left behind */
 function redact(v, kind) {
   if (!state.settings.redactPII) return v;
   if (!v) return "";
-  if (kind === "email") return "[email redacted]";
-  if (kind === "phone") return "[phone redacted]";
-  if (kind === "loc") return "[location redacted]";
+  if (kind === "email" || kind === "phone" || kind === "loc") return "";
   return v;
 }
 
@@ -407,7 +410,7 @@ function renderEditor() {
 
   <div class="card">
     <h2>Contact / Header</h2>
-    ${state.settings.redactPII ? `<p class="hint">Redact PII is ON — email/phone/location show as redacted in preview + exports.</p>` : ``}
+    ${state.settings.redactPII ? `<p class="hint">Redact PII is ON — email/phone/location are removed from the preview + exports.</p>` : ``}
     <label>Full name<input data-f="contact.fullName" value="${esc(state.contact.fullName)}" placeholder="Jordan Lee" /></label>
     <label>Job title<input data-f="contact.title" value="${esc(state.contact.title)}" placeholder="Product Designer" /></label>
     <div class="row2">
@@ -536,8 +539,8 @@ function renderEditor() {
 
   <div class="card">
     <h2>Privacy</h2>
-    <p class="hint">All data stays in this browser (<code>localStorage</code>). JSON/HTML/PDF/TXT exports are files you control — nothing is uploaded to any server.</p>
-    <p class="hint">Redaction applies to the preview, <code>.html</code>, <code>.txt</code> and Quick PDF. <strong>Save .json</strong> and the JSON view always contain your real contact details — check before sharing.</p>
+    <p class="hint">All data stays in this browser (<code>localStorage</code>). JSON/PDF/TXT exports are files you control — nothing is uploaded to any server.</p>
+    <p class="hint">Redaction applies to the preview, <code>.txt</code> and Quick PDF. <strong>Save .json</strong> and the JSON view always contain your real contact details — check before sharing.</p>
     <div class="mini-btns">
       <button type="button" data-act="privacy-redact">${state.settings.redactPII ? "Show PII" : "Redact PII for sharing"}</button>
       <button type="button" data-act="privacy-erase">Erase ALL local data</button>
@@ -751,7 +754,7 @@ function pageHtml(page, i, total) {
   const c = state.contact;
   const foot = state.settings.showPageNumbers
     ? `<div class="page-foot"><span>${esc(c.fullName)}${c.title ? " — " + esc(c.title) : ""}</span><span>Page ${i + 1} of ${total}</span></div>` : "";
-  return `${page.gap ? `<div class="page-gap"><span>manual page break</span></div>` : ""}<div class="page" data-page="${i + 1}">${(page.raw || page.blocks.map((b) => b.outerHTML).join("")).replace(/ data-pb="1"/g, "")}${foot}</div>`;
+  return `${page.gap ? `<div class="page-gap"><span>manual page break</span></div>` : ""}<div class="page" data-page="${i + 1}">${(page.raw || page.blocks.map((b) => b.outerHTML).join("")).replace(/ data-pb="1"/g, "").replace(/<div class="pb-indicator"><\/div>/g, "")}${foot}</div>`;
 }
 /* Turn every break marker into a "must start a new page" flag on the following block,
    then delete the marker. Markers exist only for preview affordance and never reach output. */
@@ -1009,7 +1012,6 @@ function syncPreviewControls() {
   const ac = $("#set-accent"); if (ac) ac.value = state.settings.accent;
   const pn = $("#set-pagenum"); if (pn) pn.checked = state.settings.showPageNumbers;
   const rd = $("#set-redact"); if (rd) rd.checked = state.settings.redactPII;
-  const eb = $("#example-banner"); if (eb) eb.hidden = !state.isExample;
   const ub = $("#btn-undo"); if (ub) ub.disabled = !hasBackup();
   syncHistButtons();
 }
@@ -1025,7 +1027,7 @@ function download(filename, text, type) {
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 function exportFilename(ext) {
-  const n = str(state.contact.fullName).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "resume";
+  const n = str(state.contact.fullName).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "resume";
   return `${n}-${new Date().toISOString().slice(0, 10)}.${ext}`;
 }
 function doExportJSON() {
@@ -1095,8 +1097,9 @@ function bindJsonView() {
 }
 
 function requestReplace(newState, label) {
-  const jobs = (newState.experience || []).length;
-  const ok = confirm(`${label}\n\nThis REPLACES the current resume (no merge).\nIncoming: ${newState.contact?.fullName || "Untitled"} — ${jobs} job(s).\n\nA backup is kept for Undo. Continue?`);
+  const data = newState.data && typeof newState.data === "object" && !Array.isArray(newState.data) ? newState.data : newState;
+  const jobs = (data.experience || []).length;
+  const ok = confirm(`${label}\n\nThis REPLACES the current resume (no merge).\nIncoming: ${data.contact?.fullName || "Untitled"} — ${jobs} job(s).\n\nA backup is kept for Undo. Continue?`);
   if (!ok) return;
   pushHistory(); backupCurrent();
   state = normalizeImport(newState);
@@ -1117,87 +1120,52 @@ function doImportFile(file) {
   };
   r.readAsText(file);
 }
-function standaloneHtml() {
-  showResumeView();
-  paintPreview();
-  const node = $("#sheet").cloneNode(true);
-  node.removeAttribute("hidden");
-  node.querySelectorAll(".page.measure").forEach((m) => m.remove()); // never ship a measuring box
-  const accent = esc(state.settings.accent);
-  // the export must reproduce the chosen margins and font size, not hard-coded defaults
-  const padMm = sheetPadMm();
-  const fontPt = sheetFontPt();
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Resume — ${esc(state.contact.fullName || "resume")}</title>
-<style>
-@page{size:A4;margin:6mm}
-body{font-family:"Segoe UI",system-ui,Arial,sans-serif;margin:0;background:#f1f5f9;color:#111;padding:20px 0}
-.no-print,.page-gap,.pb-indicator{display:none!important}
-.sheet{--sheet-font:${fontPt}pt;--sheet-pad:${padMm}mm;width:${SHEET_MM.width}mm;margin:0 auto;display:flex;flex-direction:column;gap:20px}
-.page{position:relative;background:#fff;width:${SHEET_MM.width}mm;height:${SHEET_MM.height}mm;min-height:${SHEET_MM.height}mm;padding:var(--sheet-pad);box-shadow:0 10px 30px rgba(0,0,0,.25);font-size:var(--sheet-font);line-height:1.45;box-sizing:border-box}
-.page-foot{position:absolute;left:var(--sheet-pad);right:var(--sheet-pad);bottom:9mm;display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e2e8f0;padding-top:3px;font-size:8.5pt;color:#64748b}
-.r-name{margin:0;font-size:24pt;line-height:1.1}
-.r-title{color:${accent};font-weight:600;margin:2px 0 6px;font-size:12.5pt}
-.r-contact{font-size:9.5pt;color:#334155;margin-bottom:10px}
-.r-sec{margin-top:12pt}
-.r-sec-title{font-size:11pt;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid ${accent};padding-bottom:2px;margin:0 0 6pt}
-.r-job{margin-bottom:9pt}
-.r-job-head{display:flex;justify-content:space-between;gap:8px;font-weight:700}
-.r-job-sub{font-style:italic;color:#334155;font-size:9.8pt}
-.r-list{margin:4px 0 0 18px;padding:0}.r-list li{margin:2px 0}
-.pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
-.pills span{border:1px solid #c7d2fe;background:#eef2ff;border-radius:20px;padding:1px 9px;font-size:9.5pt}
-.skill-group{margin-bottom:6pt}.skill-group strong{font-size:10pt}
-.preserve{white-space:pre-line}
-.tpl-modern .r-head{background:${accent};color:#fff;margin:calc(var(--sheet-pad) * -1) calc(var(--sheet-pad) * -1) 10px;padding:18px var(--sheet-pad);-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.tpl-modern .r-title,.tpl-modern .r-contact{color:#fff}
-.tpl-sidebar .r-cols{display:grid;grid-template-columns:62mm 1fr;gap:8mm}
-.tpl-sidebar .r-side{background:#f1f5f9;margin:calc(var(--sheet-pad) * -1) 0 calc(var(--sheet-pad) * -1) calc(var(--sheet-pad) * -1);padding:var(--sheet-pad) 6mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.tpl-sidebar .r-side .r-sec-title{border-color:#0f172a}
-.tpl-sidebar .r-name{font-size:20pt}
-@media print{
-  @page{size:A4;margin:0}
-  body{background:#fff;padding:0}
-  .page{box-shadow:none;margin:0;break-inside:auto;break-after:page}
-  .page:last-child{break-after:auto}
-  .page-foot{position:static;margin-top:10px}
-  .tpl-modern .r-head{margin:0 0 8px;padding:8px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .tpl-sidebar .r-cols{gap:6mm}
-  .tpl-sidebar .r-side{margin:0;padding:4mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .r-sec,.r-job{break-inside:auto;orphans:2;widows:2}
-  .r-sec-title,.r-job-head,.r-job-sub{break-after:avoid}
-  .skill-group{break-inside:avoid}
-}
-</style></head><body>${node.outerHTML}</body></html>`;
-}
-function ensureHtml2Pdf() {
-  if (window.html2pdf) return Promise.resolve();
+/* SRI-pinned PDF libraries: html2canvas rasterises one A4 page box, jsPDF assembles the pages.
+   Using them directly (instead of the html2pdf wrapper) is what makes multi-page output possible. */
+const PDF_LIBS = [
+  { global: "html2canvas", src: "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js", integrity: "sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" },
+  { global: "jspdf", src: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", integrity: "sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" },
+];
+function ensurePdfLibs() {
+  const missing = PDF_LIBS.filter((l) => !window[l.global]);
+  if (!missing.length) return Promise.resolve();
   toast("Loading PDF engine…");
-  return new Promise((resolve, reject) => {
+  return Promise.all(missing.map((lib) => new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+    s.src = lib.src;
     s.crossOrigin = "anonymous";
     s.referrerPolicy = "no-referrer";
-    s.integrity = "sha384-Yv5O+t3uE3hunW8uyrbpPW3iw6/5/Y7HitWJBLgqfMoA36NogMmy+8wWZMpn3HWc";
-    s.onload = resolve; s.onerror = () => reject(new Error("cdn"));
+    s.integrity = lib.integrity;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(lib.global));
     document.head.appendChild(s);
-  });
+  })));
 }
-function doQuickPdf() {
+async function doQuickPdf() {
   showResumeView();
   paintPreview();
   const pages = $$("#sheet .page");
   if (!pages.length) return toast("Nothing to export");
-  // html2pdf rasterises one element onto one page and cannot paginate - be honest about that
-  if (pages.length > 1) {
-    toast(`${pages.length} pages: use Print / PDF for exact A4 pages and selectable text. Quick PDF is single-page only.`, 5200);
-    return;
+  try {
+    await ensurePdfLibs();
+  } catch {
+    return toast("PDF engine needs network — use Print / PDF instead", 3500);
   }
-  ensureHtml2Pdf().then(() => {
-    toast("Generating PDF… (beta: rasterized — use Print/PDF for selectable text)");
-    const opt = { margin: 0, filename: exportFilename("pdf"), image: { type: "jpeg", quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: "mm", format: "a4", orientation: "portrait" } };
-    try { window.html2pdf().set(opt).from(pages[0]).save().catch(() => toast("PDF failed — use Print / PDF instead", 3000)); }
-    catch { toast("PDF failed — use Print / PDF instead", 3000); }
-  }).catch(() => toast("PDF engine needs network — use Print / PDF instead", 3500));
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const [w, h] = [SHEET_MM.width, SHEET_MM.height];
+  toast(`Rasterising ${pages.length} A4 page${pages.length === 1 ? "" : "s"}…`);
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      if (i) doc.addPage([w, h], "portrait");
+      const canvas = await window.html2canvas(pages[i], { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+      doc.addImage(canvas.toDataURL("image/jpeg", 0.96), "JPEG", 0, 0, w, h, undefined, "FAST");
+    }
+    doc.save(exportFilename("pdf"));
+    toast(`PDF saved — ${pages.length} page${pages.length === 1 ? "" : "s"} (rasterized: text is not selectable)`);
+  } catch {
+    toast("PDF failed — use Print / PDF instead", 3000);
+  }
 }
 
 function bindToolbar() {
@@ -1218,7 +1186,6 @@ function bindToolbar() {
   const rd = $("#set-redact"); if (rd) rd.addEventListener("change", (e) => { pushHistory(); state.settings.redactPII = e.target.checked; persist(); renderEditor(); renderPreview(); });
   const bp = $("#btn-print"); if (bp) bp.addEventListener("click", () => { persist(true); showResumeView(); paintPreview(); window.print(); });
   const be = $("#btn-export-json"); if (be) be.addEventListener("click", doExportJSON);
-  const bh = $("#btn-export-html"); if (bh) bh.addEventListener("click", () => { download(exportFilename("html"), standaloneHtml(), "text/html"); toast("Exported printable .html"); });
   const bt = $("#btn-export-txt"); if (bt) bt.addEventListener("click", () => { download(exportFilename("txt"), resumeToText(), "text/plain"); toast("Exported plain-text .txt"); });
   const bq = $("#btn-quick-pdf"); if (bq) bq.addEventListener("click", doQuickPdf);
   const bn = $("#btn-new"); if (bn) bn.addEventListener("click", () => {
@@ -1245,8 +1212,6 @@ function bindToolbar() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undoHistory(); }
     else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) { e.preventDefault(); redoHistory(); }
   });
-  const bf = $("#btn-banner-fresh"); if (bf) bf.addEventListener("click", () => { pushHistory(); backupCurrent(); state = defaultState(); persist(true); renderEditor(); renderPreview(); });
-  const bd = $("#btn-banner-dismiss"); if (bd) bd.addEventListener("click", () => { state.isExample = false; persist(); renderPreview(); });
   const te = $("#tab-edit"), tp = $("#tab-preview");
   const setTab = (which) => {
     document.body.classList.toggle("show-editor", which === "edit");
@@ -1263,7 +1228,7 @@ function bindToolbar() {
 window.ResumeTest = {
   SCHEMA_VERSION, validateResumeFile, migrate, normalizeImport, lintBullet, extractJdKeywords, jdResult,
   resumeToText, sampleState, defaultState, currentEnvelope, buildSheetHtml, isSectionEmpty, allSections,
-  flushPreview: paintPreview, paginateHtml, splitTall,
+  flushPreview: paintPreview, paginateHtml, splitTall, exportFilename,
   getState: () => state, setState: (s) => { state = migrate(s); },
 };
 

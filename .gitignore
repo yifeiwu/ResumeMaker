@@ -1,3 +1,5 @@
 .DS_Store
 Thumbs.db
 *.log
+# personal data: real contact details, must never be committed or deployed
+yifeiwu-resume.json

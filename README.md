@@ -25,8 +25,8 @@ Or just open `index.html` directly (file:// works, Export/Print work best over h
 - Sections: all optional (eye toggle), reorderable, per-section + per-item **page break before** toggles (dashed red indicator → real A4 break in print)
 - Custom sections: bulleted **or** paragraph layout, per-line hide/delete, break-before toggle
 - Templates: **ATS Classic** (parser-safe), **Modern** (color header + pills), **Sidebar** (two-column)
-- **Real A4 pagination:** the preview lays the resume out into actual A4 page boxes, so page 2 (and 3) are visible and the page count is exact - there is no guessing. Long sections split across pages (the section title repeats on continuations), manual breaks are honoured, and each page footer carries an accurate `Page X of Y`.
-- **Print/Export:** `Print / PDF` prints the page boxes one per sheet; `Export .html` ships the same boxes plus all template CSS. Break markers (red dashed lines) are a preview affordance only - they are stripped before anything is printed, exported or turned into a PDF. Page numbers are real, because pagination is computed rather than left to the browser.
+- **Real A4 pagination:** the preview lays the resume out into real A4 page boxes (210x297mm), so page 2 (and 3) are visible and the page count is exact - there is no guessing. Long sections split across pages (the section title repeats on continuations), manual breaks are honoured, and each page footer carries an accurate `Page X of Y`. Pagination is computed from A4 constants, so it is identical at any window size and while the preview pane is hidden.
+- **Print/Export (WYSIWYG):** `Print / PDF` prints the page boxes one per A4 sheet at 1:1 (`@page{size:A4;margin:0}`, content inset by your margin setting, so printer hardware margins never clip anything). `Export .html` writes the same literal A4 sheets, baked with your chosen margins, font size and accent. The page count you see in the preview is the page count you get. Break markers (red dashed lines) are a preview affordance only - stripped before anything is printed, exported or turned into a PDF.
 - Settings: font S/M/L, margins, accent color, print footer, **Redact PII** (hides email/phone/location in the preview, `.html`, `.txt` and Quick PDF — `Save .json` and the JSON view keep the real values); one undo step per colour-picker drag, not per pixel
 - **Undo/Redo:** 30-step in-memory history + Ctrl+Z / Ctrl+Shift+Z (typing uses native undo) covering *every* edit — text, settings and imports; plus a backup-slot `Undo replace` for whole-file restores. Pending keystrokes are flushed on tab hide/close, so nothing is lost to the autosave debounce
 - **Bullet coach:** per-item lint — flags short/long bullets, weak starts, missing metrics/action verbs
@@ -50,6 +50,16 @@ Open them by hand instead: `python -m http.server 8000`, then
 `http://localhost:8000/test.html` (12 unit checks) and `http://localhost:8000/e2e.html`
 (51 browser integration checks: JSON view round-trip, invalid input, staleness guard, export/print
 paths, undo granularity, A4 pagination incl. a no-content-loss invariant).
+
+## Desktop-first
+
+The layout targets desktop: a 440px editor beside a live A4 preview, A4 sheets shown at true
+210x297mm, sticky preview pane. Narrow windows switch to the Edit/Preview tab layout - those rules
+are `screen`-scoped on purpose, because print paper is ~794px wide and an unscoped `max-width`
+query would hide the resume when printing (it did, once).
+
+**In the print dialog choose A4 and margins "None"/"Default"** - the sheets are already A4-sized and
+include their own margins, so "Default" (browser adds its own) would shrink and re-flow them.
 
 ## Known limitation
 

@@ -128,7 +128,9 @@ label{display:block;font-size:12.5px;color:#334155;margin:8px 0 2px}
 .json-stale{margin:8px 0 0;font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:6px 9px}
 .json-error{margin-top:8px;font-size:12.5px;color:#b91c1c;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:6px 9px;white-space:pre-wrap}
 
-@media (max-width:1000px){
+/* Viewport-only: MUST stay screen-scoped. Print paper is ~794px wide, so an unscoped
+   max-width query matches when printing and can hide the sheet entirely. */
+@media screen and (max-width:1000px){
   .layout{grid-template-columns:1fr}
   .editor{max-height:none;overflow:visible}
   .preview-pane{position:static}
@@ -140,10 +142,13 @@ label{display:block;font-size:12.5px;color:#334155;margin:8px 0 2px}
   body.show-editor .preview-pane{display:none}
 }
 
-/* ---- PRINT: one .page box = one sheet of paper ---- */
+/* ---- PRINT: one .page box = one sheet of paper ----
+   The box is a literal A4 sheet (210x297mm) with the same --sheet-pad as the preview, so the
+   printable text area is identical to what you see on screen. @page margin 0 keeps the 1:1
+   mapping; all content sits inside --sheet-pad, so printer hardware margins are not an issue. */
 @media print{
-  @page{size:A4;margin:12mm}
-  body{background:#fff}
+  @page{size:A4;margin:0}
+  body{background:#fff;padding:0}
   .no-print{display:none !important}
   #json-view{display:none !important}
   /* safety net: printing must never be blank, whatever view is active */
@@ -151,8 +156,8 @@ label{display:block;font-size:12.5px;color:#334155;margin:8px 0 2px}
   .layout{display:block;padding:0;margin:0;max-width:none}
   .preview-pane{position:static}
   .preview-scroll{background:#fff;padding:0;display:block;max-height:none;overflow:visible}
-  .sheet{width:auto;gap:0}
-  .page{width:auto;min-height:0;padding:0;margin:0;box-shadow:none;break-inside:auto;break-after:page}
+  .sheet{width:210mm;gap:0}
+  .page{width:210mm;height:297mm;min-height:297mm;padding:var(--sheet-pad);margin:0;box-shadow:none;background:#fff;break-inside:auto;break-after:page}
   .page:last-child{break-after:auto}
   .page.measure{display:none !important}
   .page-gap,.pb-indicator{display:none !important}

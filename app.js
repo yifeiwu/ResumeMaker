@@ -762,6 +762,21 @@ function markBreaks(root) {
     m.remove();
   });
 }
+/* A4 geometry: one source of truth for the preview, the printer and the exported file.
+   Derived from constants rather than measured from a rendered box, so pagination is identical
+   at any window size and cannot be skewed by mobile CSS or a hidden preview pane. */
+const MM_PX = 96 / 25.4;
+const SHEET_MM = { width: 210, height: 297 };
+const PAD_MM = { narrow: 11, normal: 18, wide: 23 };
+const FONT_PT = { small: 11, medium: 12.2, large: 13.2 };
+const FOOT_RESERVE = 34; // the footer is absolute in the preview but in-flow in print
+const FIT_SAFETY = 22;   // a few px of slack so a box that fits here always fits on paper
+const sheetPadMm = () => PAD_MM[state.settings.margins] || PAD_MM.normal;
+const sheetFontPt = () => FONT_PT[state.settings.fontSize] || FONT_PT.medium;
+const a4Content = () => ({
+  w: SHEET_MM.width * MM_PX - sheetPadMm() * MM_PX * 2,
+  h: SHEET_MM.height * MM_PX - sheetPadMm() * MM_PX * 2 - (state.settings.showPageNumbers ? FOOT_RESERVE : 0) - FIT_SAFETY,
+});
 /* painted extent of a block, collapsed margins included - one metric for every fit decision */
 function blockExtent(node) {
   const ch = node.children;
@@ -780,19 +795,22 @@ function paginateHtml(flatHtml) {
     wrap.innerHTML = flatHtml;
     markBreaks(wrap);
     probe = document.createElement("div");
-    probe.className = "page measure";
-    host.appendChild(probe);
-    const cs = getComputedStyle(probe);
-    const pageBoxH = probe.clientHeight;
-    const contentW = probe.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    // SAFETY: the footer is absolute in the preview but in-flow in print, and print renders a few
-    // px differently - reserve enough that a box that fits here always fits on paper
-    const SAFETY = 22;
-    const contentH = pageBoxH - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - (state.settings.showPageNumbers ? 34 : 0) - SAFETY;
+    /* The probe lives on <body>, never inside #sheet: on narrow viewports the preview pane is
+       display:none (mobile Edit/Preview tabs), which would make every measurement zero and
+       collapse the whole resume into a single overflowing box. */
+    probe.className = `page measure tpl-${state.settings.templateId} fs-${state.settings.fontSize} mg-${state.settings.margins}`;
+    probe.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;pointer-events:none;box-sizing:border-box`;
+    probe.style.setProperty("--sheet-pad", sheetPadMm() + "mm");
+    probe.style.setProperty("--sheet-font", sheetFontPt() + "pt");
+    document.body.appendChild(probe);
+    const box = a4Content();
     probe.style.padding = "0";
+    probe.style.margin = "0";
     probe.style.minHeight = "0";
-    probe.style.height = "auto";
-    probe.style.width = contentW + "px";
+    probe.style.height = "0";
+    probe.style.width = box.w + "px";
+    const contentW = box.w;
+    const contentH = box.h;
     const pages = [];
     let blocks = [], pendingGap = false;
     const start = () => {
@@ -831,7 +849,8 @@ function paginateHtml(flatHtml) {
     if (!pages.length) return { pages: [{ blocks: [], raw: flatHtml, gap: false }], capacity: contentH };
     return { pages, capacity: contentH };
   } catch {
-    return { pages: [{ blocks: [], raw: flatHtml, gap: false }], capacity: 0 }; // never let measurement break the preview
+    // never let a measurement problem break the preview: one long box, honest overflow warning
+    return { pages: [{ blocks: [], raw: flatHtml, gap: false }], capacity: 0 };
   } finally {
     if (probe) probe.remove();
   }
@@ -1105,13 +1124,16 @@ function standaloneHtml() {
   node.removeAttribute("hidden");
   node.querySelectorAll(".page.measure").forEach((m) => m.remove()); // never ship a measuring box
   const accent = esc(state.settings.accent);
+  // the export must reproduce the chosen margins and font size, not hard-coded defaults
+  const padMm = sheetPadMm();
+  const fontPt = sheetFontPt();
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Resume — ${esc(state.contact.fullName || "resume")}</title>
 <style>
-@page{size:A4;margin:12mm}
+@page{size:A4;margin:6mm}
 body{font-family:"Segoe UI",system-ui,Arial,sans-serif;margin:0;background:#f1f5f9;color:#111;padding:20px 0}
 .no-print,.page-gap,.pb-indicator{display:none!important}
-.sheet{--sheet-font:12.2pt;--sheet-pad:18mm;width:210mm;margin:0 auto;display:flex;flex-direction:column;gap:20px}
-.page{position:relative;background:#fff;width:210mm;min-height:297mm;padding:var(--sheet-pad);box-shadow:0 10px 30px rgba(0,0,0,.25);font-size:var(--sheet-font);line-height:1.45;box-sizing:border-box}
+.sheet{--sheet-font:${fontPt}pt;--sheet-pad:${padMm}mm;width:${SHEET_MM.width}mm;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+.page{position:relative;background:#fff;width:${SHEET_MM.width}mm;height:${SHEET_MM.height}mm;min-height:${SHEET_MM.height}mm;padding:var(--sheet-pad);box-shadow:0 10px 30px rgba(0,0,0,.25);font-size:var(--sheet-font);line-height:1.45;box-sizing:border-box}
 .page-foot{position:absolute;left:var(--sheet-pad);right:var(--sheet-pad);bottom:9mm;display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e2e8f0;padding-top:3px;font-size:8.5pt;color:#64748b}
 .r-name{margin:0;font-size:24pt;line-height:1.1}
 .r-title{color:${accent};font-weight:600;margin:2px 0 6px;font-size:12.5pt}
@@ -1133,9 +1155,9 @@ body{font-family:"Segoe UI",system-ui,Arial,sans-serif;margin:0;background:#f1f5
 .tpl-sidebar .r-side .r-sec-title{border-color:#0f172a}
 .tpl-sidebar .r-name{font-size:20pt}
 @media print{
-  @page{size:A4;margin:12mm}
+  @page{size:A4;margin:0}
   body{background:#fff;padding:0}
-  .page{box-shadow:none;width:auto;min-height:0;padding:0;break-inside:auto;break-after:page}
+  .page{box-shadow:none;margin:0;break-inside:auto;break-after:page}
   .page:last-child{break-after:auto}
   .page-foot{position:static;margin-top:10px}
   .tpl-modern .r-head{margin:0 0 8px;padding:8px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}

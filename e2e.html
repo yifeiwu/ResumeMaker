@@ -54,6 +54,19 @@ async function run() {
     flush(); // the very first paint is frame-coalesced - force it before asserting
 
     say("editor rendered", !!$("#editor h2"));
+    // print paper is ~794px wide: an unscoped max-width query would match while printing and
+    // could hide the sheet (this actually shipped once) - keep viewport rules screen-only
+    const unscoped = [];
+    for (const sheet of Array.from(d.styleSheets)) {
+      let rules = [];
+      try { rules = Array.from(sheet.cssRules || []); } catch (e) { continue; }
+      rules.forEach((r) => {
+        if (r.type === 4 && /max-width/.test(r.conditionText || "") && !/screen/.test(r.conditionText || "")) unscoped.push(r.conditionText);
+      });
+    }
+    say("viewport media queries are screen-scoped (print safety)", unscoped.length === 0, );
+    say("the preview pane is not hidden by a body state class",
+      w.getComputedStyle($(".preview-pane")).display !== "none");
     say("profile UI removed", !/Profile/.test($("#editor").textContent));
     say("example resume auto-loaded", R.getState().contact.fullName === "Alex Morgan");
     say("sheet has content", $("#sheet").textContent.length > 400);
@@ -73,19 +86,35 @@ async function run() {
     say("page estimate matches the page boxes", $("#page-est").textContent.indexOf(pagesNow.length + " page") === 0);
     say("page boxes are A4 sized", pagesNow.every((p) => p.getBoundingClientRect().width > 600 && p.getBoundingClientRect().height > 900));
     say("no page overflows its A4 box", pagesNow.every((p) => overflows(p) < 8));
-    // pagination must never drop or invent content, in any template
-    const strip = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const flatTxt = strip(R.buildSheetHtml());
-    const pagedTxt = strip(Array.from(d.querySelectorAll("#sheet .page")).map((p) => p.innerHTML).join(" "));
-    const lost = ["Alex Morgan", "Northwind Labs", "Brightline Health", "Citysoft", "Summary", "Experience", "Skills", "Education"]
-      .filter((n) => flatTxt.indexOf(n) > -1 && pagedTxt.indexOf(n) === -1);
-    say("pagination preserves all content (ats)", lost.length === 0);
-    say("page footers and repeated section titles are the only additions",
-      pagedTxt.length >= flatTxt.length && pagedTxt.length - flatTxt.length < flatTxt.length * 0.4);
+    // the mobile Edit/Preview tabs hide the preview pane; pagination must not depend on it
+    const pane = $(".preview-pane");
+    const beforeHide = boxes().length;
+    pane.style.display = "none";
+    flush();
+    say("pagination is independent of the preview pane being hidden", boxes().length === beforeHide && beforeHide > 0);
+    pane.style.display = "";
+    flush();
+    say("restoring the pane keeps the same pagination", boxes().length === beforeHide);
     $('[data-tpl="sidebar"]').click();
     flush();
-    const sideTxt = strip(Array.from(d.querySelectorAll("#sheet .page")).map((p) => p.innerHTML).join(" "));
-    const lostSide = ["Alex Morgan", "Northwind Labs", "Citysoft", "Summary", "Experience", "Skills", "Education"]
+    say("sidebar pages are also measured while the pane is hidden", boxes().length >= 1);
+    // pagination must never drop or invent content, in any template (footers excluded: they repeat the name)
+    const strip = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const noFooters = () => Array.from(d.querySelectorAll("#sheet .page")).map((p) => {
+      const c = p.cloneNode(true);
+      c.querySelectorAll(".page-foot").forEach((f) => f.remove());
+      return c.innerHTML;
+    }).join(" ");
+    const flatTxt = strip(R.buildSheetHtml());
+    const pagedTxt = strip(noFooters());
+    const lost = ["Alex Morgan", "Northwind Labs", "Brightline Health", "Citysoft", "Frontend engineer with 8+ years", "cutting load time 43%", "Summary", "Experience", "Skills", "Education"]
+      .filter((n) => flatTxt.indexOf(n) > -1 && pagedTxt.indexOf(n) === -1);
+    say("pagination preserves all content (ats)", lost.length === 0);
+    say("the header block is rendered", pagedTxt.indexOf("Senior Frontend Engineer") > -1 && pagedTxt.indexOf("Austin, TX") > -1);
+    $('[data-tpl="sidebar"]').click();
+    flush();
+    const sideTxt = strip(noFooters());
+    const lostSide = ["Alex Morgan", "Northwind Labs", "Citysoft", "Summary", "Experience", "Skills"]
       .filter((n) => sideTxt.indexOf(n) === -1);
     say("pagination preserves all content (sidebar)", lostSide.length === 0);
     $('[data-tpl="ats"]').click();

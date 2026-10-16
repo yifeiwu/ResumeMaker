@@ -194,7 +194,19 @@ function syncHistButtons() {
 
 /* ================= BULLET COACH ================= */
 const WEAK_STARTS = ["responsible for", "helped", "worked on", "assisted", "tasked with", "helped with", "worked with", "in charge of"];
-const ACTION_VERBS = ["led", "built", "shipped", "launched", "migrated", "designed", "owned", "drove", "cut", "improved", "increased", "reduced", "mentored", "introduced", "partnered", "added", "created", "automated", "converted"];
+/* verbs are matched as base + generated -s/-ed/-ing/-d forms plus common irregular pasts,
+   otherwise "Build…", "Integrated…", "Diagnosed…" get wrongly flagged as having no verb */
+const VERB_BASE = ("lead build ship launch migrate design own drive cut improve increase reduce mentor introduce partner add create automate convert " +
+  "manage maintain architect integrate diagnose deliver deploy implement refactor optimize optimise modernize modernise document analyze analyse troubleshoot resolve " +
+  "support scale standardize standardise streamline orchestrate prototype benchmark translate train onboard secure validate verify simplify unify upgrade review " +
+  "identify measure publish generate establish execute expand handle respond plan report test enable facilitate guide evaluate prioritize prioritise spearhead champion " +
+  "pioneer serve use run write grow make take give keep bring hold find win set reduce map forecast shape structure").split(" ");
+const VERB_PAST = { led: 1, built: 1, drove: 1, chose: 1, wrote: 1, grew: 1, ran: 1, made: 1, took: 1, gave: 1, kept: 1, brought: 1, held: 1, found: 1, won: 1, cut: 1, set: 1, shipped: 1, owned: 1, reduced: 1, spoke: 1, began: 1 };
+const ACTION_VERB_SET = new Set([
+  ...VERB_BASE,
+  ...VERB_BASE.flatMap((v) => [v + "s", v + "ed", v + "ing", v.endsWith("e") ? v + "d" : null].filter(Boolean)),
+  ...Object.keys(VERB_PAST),
+]);
 function lintBullet(b) {
   const w = [];
   const s = (b || "").trim();
@@ -204,7 +216,8 @@ function lintBullet(b) {
   const low = s.toLowerCase();
   if (WEAK_STARTS.some((p) => low.startsWith(p))) w.push("Weak start — use an action verb (Led/Built/Shipped…).");
   if (!/\d/.test(s)) w.push("No metric — add %, $, time, or count.");
-  if (!ACTION_VERBS.some((v) => low.startsWith(v)) && !/\b(led|built|shipped|cut|improved|migrated|designed|owned|drove|mentored)\b/.test(low)) w.push("No strong action verb detected.");
+  const tokens = low.split(/[^a-z]+/).filter(Boolean);
+  if (!tokens.some((t) => ACTION_VERB_SET.has(t))) w.push("No action verb detected — start with Led/Built/Designed/Architected.");
   return w;
 }
 function coachForBullets(bullets) {
@@ -723,8 +736,7 @@ function buildSheetHtml() {
     body = `${head}${order.map((id) => sectionHtml(id, tpl === "modern")).join("")}`;
   }
   if (!order.some((id) => sectionVisible(id) && !isSectionEmpty(id))) body += `<p class="hint no-print">Nothing visible yet — enable a section or load the example.</p>`;
-  const footer = state.settings.showPageNumbers ? `<div class="page-footer"><span>${esc(c.fullName)} — Resume</span><span>${esc(c.title)}</span></div>` : "";
-  return body + footer;
+  return body; // per-page footers are added by pageHtml(), one per A4 box
 }
 let previewQueued = false;
 function renderPreview() { // coalesced: at most one paint per animation frame
@@ -732,29 +744,193 @@ function renderPreview() { // coalesced: at most one paint per animation frame
   previewQueued = true;
   requestAnimationFrame(() => { previewQueued = false; paintPreview(); });
 }
+function sheetClass() {
+  return `sheet tpl-${state.settings.templateId} fs-${state.settings.fontSize} mg-${state.settings.margins}`;
+}
+function pageHtml(page, i, total) {
+  const c = state.contact;
+  const foot = state.settings.showPageNumbers
+    ? `<div class="page-foot"><span>${esc(c.fullName)}${c.title ? " — " + esc(c.title) : ""}</span><span>Page ${i + 1} of ${total}</span></div>` : "";
+  return `${page.gap ? `<div class="page-gap"><span>manual page break</span></div>` : ""}<div class="page" data-page="${i + 1}">${(page.raw || page.blocks.map((b) => b.outerHTML).join("")).replace(/ data-pb="1"/g, "")}${foot}</div>`;
+}
+/* Turn every break marker into a "must start a new page" flag on the following block,
+   then delete the marker. Markers exist only for preview affordance and never reach output. */
+function markBreaks(root) {
+  root.querySelectorAll(".pb-indicator").forEach((m) => {
+    const next = m.nextElementSibling;
+    if (next) next.setAttribute("data-pb", "1");
+    m.remove();
+  });
+}
+/* painted extent of a block, collapsed margins included - one metric for every fit decision */
+function blockExtent(node) {
+  const ch = node.children;
+  if (!ch.length) return node.offsetHeight;
+  const cs = getComputedStyle(node);
+  return ch[ch.length - 1].getBoundingClientRect().bottom - ch[0].getBoundingClientRect().top +
+    parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+}
+/* Lay the flat markup out into exact A4 boxes: what you see is what prints. */
+function paginateHtml(flatHtml) {
+  const host = $("#sheet");
+  if (!host) return { pages: [{ blocks: [], raw: flatHtml, gap: false }], capacity: 0 };
+  let probe = null;
+  try {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = flatHtml;
+    markBreaks(wrap);
+    probe = document.createElement("div");
+    probe.className = "page measure";
+    host.appendChild(probe);
+    const cs = getComputedStyle(probe);
+    const pageBoxH = probe.clientHeight;
+    const contentW = probe.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    // SAFETY: the footer is absolute in the preview but in-flow in print, and print renders a few
+    // px differently - reserve enough that a box that fits here always fits on paper
+    const SAFETY = 22;
+    const contentH = pageBoxH - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - (state.settings.showPageNumbers ? 34 : 0) - SAFETY;
+    probe.style.padding = "0";
+    probe.style.minHeight = "0";
+    probe.style.height = "auto";
+    probe.style.width = contentW + "px";
+    const pages = [];
+    let blocks = [], pendingGap = false;
+    const start = () => {
+      if (blocks.length) pages.push({ blocks, gap: pendingGap });
+      blocks.forEach((b) => b.remove());
+      blocks = []; pendingGap = false;
+    };
+    /* one height metric for the probe and for split parts: painted extent incl. collapsed margins.
+       clientHeight would include margins the splitter does not see, and the two must agree. */
+    const usedH = (n) => blockExtent(n);
+    const fits = () => usedH(probe) <= contentH;
+    for (const el of Array.from(wrap.children)) {
+      if (el.hasAttribute("data-pb")) {
+        if (blocks.length) start(); // close the current page first - the flag must win over "it fits"
+        pendingGap = true;
+      }
+      probe.appendChild(el);
+      if (fits()) { blocks.push(el); continue; }
+      const huge = usedH(probe) > contentH;
+      el.remove();
+      // oversized sections are spread over pages first, then each part is placed greedily;
+      // the first part is sized to whatever is left on the current page so it does not get orphaned
+      const roomLeft = blocks.length ? Math.max(140, contentH - usedH(probe)) : contentH;
+      // note: a two-column (.r-cols) block is never split - half a grid is worse than a warning
+      const parts = huge && !el.classList.contains("r-cols") ? atomize(el, probe, contentH, 0, roomLeft) : [el];
+      parts.forEach((p) => p.remove());
+      parts.forEach((part, k) => {
+        probe.appendChild(part);
+        if (blocks.length && !fits()) { part.remove(); start(); probe.appendChild(part); }
+        else if (k > 0 && part.hasAttribute("data-pb")) pendingGap = true;
+        blocks.push(part);
+        if (k < parts.length - 1) start();
+      });
+    }
+    start();
+    if (!pages.length) return { pages: [{ blocks: [], raw: flatHtml, gap: false }], capacity: contentH };
+    return { pages, capacity: contentH };
+  } catch {
+    return { pages: [{ blocks: [], raw: flatHtml, gap: false }], capacity: 0 }; // never let measurement break the preview
+  } finally {
+    if (probe) probe.remove();
+  }
+}
+/* keep splitting a block until every piece actually fits one page (guaranteed progress, depth-capped) */
+function atomize(node, probe, limit, depth, firstLimit) {
+  if (node.classList && node.classList.contains("r-cols")) return [node]; // two-column grid: never split
+  if (!node.isConnected) probe.appendChild(node);
+  const lim = depth === 0 && firstLimit ? firstLimit : limit;
+  if (blockExtent(node) <= lim || !node.children.length || depth > 6) return [node];
+  const pieces = splitTall(node, probe, limit, depth, lim);
+  if (pieces.length < 2) return [node];
+  const out = [];
+  pieces.forEach((p) => atomize(p, probe, limit, depth + 1).forEach((a) => out.push(a)));
+  return out;
+}
+/* One block taller than a page: clone its shell and spread its children over several pages,
+   repeating the section title on continuation pages so no page starts mid-section. */
+function splitTall(el, probe, contentH, depth, firstAvail, mount) {
+  const kids = Array.from(el.children);
+  const d = depth || 0;
+  const room0 = firstAvail || contentH;
+  const host = mount || probe;
+  if (!kids.length || d > 3) { host.appendChild(el); return [el]; }
+  const title = el.querySelector(":scope > .r-sec-title");
+  const parts = [];
+  let cur = null;
+  const shell = () => { const c = el.cloneNode(false); host.appendChild(c); parts.push(c); return c; };
+  // measure the shell's real painted extent, not just offsetHeight
+  const over = (n, limit) => blockExtent(n) > limit;
+  const deepen = (shellNode) => {
+    if (shellNode.children.length !== 1) return;
+    const only = shellNode.children[0];
+    if (!only.children.length) return;
+    shellNode.removeChild(only);
+    splitTall(only, probe, contentH, d + 1, contentH, host).forEach((sub) => shellNode.appendChild(sub));
+  };
+  for (const kid of kids) {
+    if (!cur) {
+      cur = shell();
+      cur.appendChild(kid);
+      if (over(cur, room0)) deepen(cur);
+      continue;
+    }
+    // a break flag always wins over filling: the block starts a fresh page
+    cur.appendChild(kid);
+    if (kid.hasAttribute("data-pb") && cur.children.length > 1) {
+      cur.removeChild(kid);
+      cur = shell();
+      cur.setAttribute("data-pb", "1"); // tells the caller to label the gap
+      if (title) cur.appendChild(title.cloneNode(true));
+      cur.appendChild(kid);
+      continue;
+    }
+    if (over(cur, cur === parts[0] ? room0 : contentH)) {
+      if (cur.children.length > 1) {
+        cur.removeChild(kid);
+        cur = shell();
+        if (title) cur.appendChild(title.cloneNode(true));
+        cur.appendChild(kid);
+      }
+      if (over(cur, contentH)) deepen(cur);
+    }
+  }
+  return parts;
+}
 function paintPreview() {
   const sheet = $("#sheet");
   if (!sheet) return;
-  sheet.className = `sheet tpl-${state.settings.templateId} fs-${state.settings.fontSize} mg-${state.settings.margins}`;
+  sheet.className = sheetClass();
   sheet.style.setProperty("--accent", state.settings.accent);
-  sheet.innerHTML = buildSheetHtml();
+  const paged = paginateHtml(buildSheetHtml());
+  const pages = paged.pages;
+  sheet.innerHTML = pages.map((p, i) => pageHtml(p, i, pages.length)).join("");
   syncPreviewControls();
   syncJsonView();
-  updatePageEstimate();
+  updatePageEstimate(pages.length, paged.capacity);
 }
 
-/* ---- page overflow guard ---- */
-function updatePageEstimate() {
-  const sheet = $("#sheet"), el = $("#page-est");
-  if (!sheet || !el || !sheet.clientWidth) return; // hidden (JSON view) → no meaningless numbers
-  if (sheet.clientWidth < 620) { el.textContent = "Est. n/a on a narrow screen — print for real page count"; el.className = ""; return; }
-  const pages = sheet.scrollHeight / ((sheet.clientWidth * 297) / 210);
-  const manual = (sheet.innerHTML.match(/pb-indicator/g) || []).length;
-  let msg = `Est. ${pages.toFixed(1)} pages (${manual} manual break${manual === 1 ? "" : "s"})`;
-  if (pages > 2.05) msg += " — over 2 pages: trim or add a break";
-  else if (pages > 1.05 && pages < 1.25) msg += " — awkward 1.2 pages: trim a little or force 2 clean pages";
+/* ---- page guard: exact count, plus an honest overflow warning ---- */
+function updatePageEstimate(pageCount, capacity) {
+  const el = $("#page-est");
+  if (!el) return;
+  const boxes = $$("#sheet .page");
+  const n = pageCount || boxes.length || 1;
+  const manual = $("#sheet").querySelectorAll(".page-gap").length;
+  let over = 0;
+  if (capacity) {
+    boxes.forEach((p) => {
+      const kids = Array.from(p.children).filter((k) => !k.classList.contains("page-foot"));
+      const used = kids.length ? kids[kids.length - 1].getBoundingClientRect().bottom - kids[0].getBoundingClientRect().top : 0;
+      if (used > capacity + 8) over++;
+    });
+  }
+  let msg = `${n} page${n === 1 ? "" : "s"} (${manual} manual break${manual === 1 ? "" : "s"})`;
+  if (over) msg += ` — ${over} page${over === 1 ? "" : "s"} overflow: trim content or use a single-column template`;
+  else if (n > 2) msg += " — over 2 pages: trim content or remove a break";
   el.textContent = msg;
-  el.className = pages > 2.05 ? "over" : pages > 1.05 && pages < 1.25 ? "warn" : "";
+  el.className = over ? "over" : n > 2 ? "warn" : "";
 }
 
 /* ================= PLAIN TEXT (ATS .txt) ================= */
@@ -927,19 +1103,22 @@ function standaloneHtml() {
   paintPreview();
   const node = $("#sheet").cloneNode(true);
   node.removeAttribute("hidden");
+  node.querySelectorAll(".page.measure").forEach((m) => m.remove()); // never ship a measuring box
   const accent = esc(state.settings.accent);
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Resume — ${esc(state.contact.fullName || "resume")}</title>
 <style>
 @page{size:A4;margin:12mm}
-body{font-family:"Segoe UI",system-ui,Arial,sans-serif;margin:0;background:#fff;color:#111}
-.no-print{display:none!important}
-.sheet{max-width:210mm;margin:0 auto;padding:14mm;font-size:12pt;line-height:1.45}
+body{font-family:"Segoe UI",system-ui,Arial,sans-serif;margin:0;background:#f1f5f9;color:#111;padding:20px 0}
+.no-print,.page-gap,.pb-indicator{display:none!important}
+.sheet{--sheet-font:12.2pt;--sheet-pad:18mm;width:210mm;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+.page{position:relative;background:#fff;width:210mm;min-height:297mm;padding:var(--sheet-pad);box-shadow:0 10px 30px rgba(0,0,0,.25);font-size:var(--sheet-font);line-height:1.45;box-sizing:border-box}
+.page-foot{position:absolute;left:var(--sheet-pad);right:var(--sheet-pad);bottom:9mm;display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e2e8f0;padding-top:3px;font-size:8.5pt;color:#64748b}
 .r-name{margin:0;font-size:24pt;line-height:1.1}
 .r-title{color:${accent};font-weight:600;margin:2px 0 6px;font-size:12.5pt}
 .r-contact{font-size:9.5pt;color:#334155;margin-bottom:10px}
-.r-sec{margin-top:12pt;break-inside:avoid}
-.r-sec-title{font-size:11pt;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid ${accent};padding-bottom:2px;margin:0 0 6px}
-.r-job{margin-bottom:9pt;break-inside:avoid}
+.r-sec{margin-top:12pt}
+.r-sec-title{font-size:11pt;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid ${accent};padding-bottom:2px;margin:0 0 6pt}
+.r-job{margin-bottom:9pt}
 .r-job-head{display:flex;justify-content:space-between;gap:8px;font-weight:700}
 .r-job-sub{font-style:italic;color:#334155;font-size:9.8pt}
 .r-list{margin:4px 0 0 18px;padding:0}.r-list li{margin:2px 0}
@@ -947,15 +1126,26 @@ body{font-family:"Segoe UI",system-ui,Arial,sans-serif;margin:0;background:#fff;
 .pills span{border:1px solid #c7d2fe;background:#eef2ff;border-radius:20px;padding:1px 9px;font-size:9.5pt}
 .skill-group{margin-bottom:6pt}.skill-group strong{font-size:10pt}
 .preserve{white-space:pre-line}
-.page-footer{margin-top:12pt;font-size:8.5pt;color:#64748b;display:flex;justify-content:space-between}
-.tpl-modern .r-head{background:${accent};color:#fff;margin:-14mm -14mm 10px;padding:18px 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.tpl-modern .r-head{background:${accent};color:#fff;margin:calc(var(--sheet-pad) * -1) calc(var(--sheet-pad) * -1) 10px;padding:18px var(--sheet-pad);-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .tpl-modern .r-title,.tpl-modern .r-contact{color:#fff}
 .tpl-sidebar .r-cols{display:grid;grid-template-columns:62mm 1fr;gap:8mm}
-.tpl-sidebar .r-side{background:#f1f5f9;margin:-14mm 0 -14mm -14mm;padding:14mm 6mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.tpl-sidebar .r-side{background:#f1f5f9;margin:calc(var(--sheet-pad) * -1) 0 calc(var(--sheet-pad) * -1) calc(var(--sheet-pad) * -1);padding:var(--sheet-pad) 6mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .tpl-sidebar .r-side .r-sec-title{border-color:#0f172a}
 .tpl-sidebar .r-name{font-size:20pt}
-.pb-indicator{break-before:page;height:0;border-top:2px dashed #ef4444}
-</style></head><body>${node.outerHTML}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`;
+@media print{
+  @page{size:A4;margin:12mm}
+  body{background:#fff;padding:0}
+  .page{box-shadow:none;width:auto;min-height:0;padding:0;break-inside:auto;break-after:page}
+  .page:last-child{break-after:auto}
+  .page-foot{position:static;margin-top:10px}
+  .tpl-modern .r-head{margin:0 0 8px;padding:8px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .tpl-sidebar .r-cols{gap:6mm}
+  .tpl-sidebar .r-side{margin:0;padding:4mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .r-sec,.r-job{break-inside:auto;orphans:2;widows:2}
+  .r-sec-title,.r-job-head,.r-job-sub{break-after:avoid}
+  .skill-group{break-inside:avoid}
+}
+</style></head><body>${node.outerHTML}</body></html>`;
 }
 function ensureHtml2Pdf() {
   if (window.html2pdf) return Promise.resolve();
@@ -973,10 +1163,17 @@ function ensureHtml2Pdf() {
 function doQuickPdf() {
   showResumeView();
   paintPreview();
+  const pages = $$("#sheet .page");
+  if (!pages.length) return toast("Nothing to export");
+  // html2pdf rasterises one element onto one page and cannot paginate - be honest about that
+  if (pages.length > 1) {
+    toast(`${pages.length} pages: use Print / PDF for exact A4 pages and selectable text. Quick PDF is single-page only.`, 5200);
+    return;
+  }
   ensureHtml2Pdf().then(() => {
     toast("Generating PDF… (beta: rasterized — use Print/PDF for selectable text)");
     const opt = { margin: 0, filename: exportFilename("pdf"), image: { type: "jpeg", quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: "mm", format: "a4", orientation: "portrait" } };
-    try { window.html2pdf().set(opt).from($("#sheet")).save().catch(() => toast("PDF failed — use Print / PDF instead", 3000)); }
+    try { window.html2pdf().set(opt).from(pages[0]).save().catch(() => toast("PDF failed — use Print / PDF instead", 3000)); }
     catch { toast("PDF failed — use Print / PDF instead", 3000); }
   }).catch(() => toast("PDF engine needs network — use Print / PDF instead", 3500));
 }
@@ -1044,7 +1241,7 @@ function bindToolbar() {
 window.ResumeTest = {
   SCHEMA_VERSION, validateResumeFile, migrate, normalizeImport, lintBullet, extractJdKeywords, jdResult,
   resumeToText, sampleState, defaultState, currentEnvelope, buildSheetHtml, isSectionEmpty, allSections,
-  flushPreview: paintPreview,
+  flushPreview: paintPreview, paginateHtml, splitTall,
   getState: () => state, setState: (s) => { state = migrate(s); },
 };
 

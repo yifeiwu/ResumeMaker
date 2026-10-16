@@ -30,7 +30,7 @@
     <span class="sep"></span>
     <button id="btn-export-html" type="button" title="Download standalone printable .html file">Export .html</button>
     <button id="btn-export-txt" type="button" title="Download plain-text ATS version">Export .txt</button>
-    <button id="btn-quick-pdf" type="button" title="One-click PDF via html2pdf (beta: rasterized, may lose selectable text)">Quick PDF</button>
+    <button id="btn-quick-pdf" type="button" title="One-click PDF via html2pdf. Single page only — for 2+ pages use Print / PDF (selectable text, exact A4).">Quick PDF</button>
     <button id="btn-print" type="button" class="primary" title="Print / Save as PDF">Print / PDF</button>
   </div>
 </header>
@@ -68,11 +68,11 @@
           <option value="narrow">Narrow</option><option value="normal" selected>Normal</option><option value="wide">Wide</option>
         </select></label>
         <label for="set-accent">Accent <input type="color" id="set-accent" value="#1d4ed8" /></label>
-        <label class="check" title="Print footer with your name and title. For page numbers enable your browser's own header/footer in the print dialog."><input type="checkbox" id="set-pagenum" checked /> Footer</label>
+        <label class="check" title="Print footer with your name and an accurate Page X of Y on every page"><input type="checkbox" id="set-pagenum" checked /> Footer</label>
         <label class="check" title="Hide email/phone/location in the preview, .html, .txt and Quick PDF. Save .json and the JSON view keep the real values."><input type="checkbox" id="set-redact" /> Redact PII</label>
       </div>
     </div>
-    <p class="preview-hint no-print"><span id="page-est">Est. — pages</span> · Dashed lines = manual page breaks (print to 1–2 A4 pages via <strong>Print / PDF</strong>). Hidden/empty sections never print. <span class="muted">Data stays in your browser — nothing is uploaded.</span></p>
+    <p class="preview-hint no-print"><span id="page-est">— pages</span> · Each box below is one real A4 page — what you see is what prints. <span class="muted">Break markers are preview-only and never reach your PDF or exports.</span></p>
     <div id="preview-scroll" class="preview-scroll" tabindex="-1">
       <div id="sheet" class="sheet"></div>
       <div id="json-view" class="json-view" hidden>

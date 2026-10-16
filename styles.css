@@ -53,10 +53,15 @@ label{display:block;font-size:12.5px;color:#334155;margin:8px 0 2px}
 .preview-hint{font-size:12px;color:var(--muted);margin:0 0 8px}
 .preview-scroll{background:#94a3b8;border-radius:12px;padding:22px;display:flex;justify-content:center;max-height:calc(100vh - 200px);overflow:auto}
 
-/* A4 sheet */
-.sheet{background:#fff;width:210mm;min-height:297mm;padding:var(--sheet-pad);box-shadow:0 10px 30px rgba(0,0,0,.35);color:#111;font-size:var(--sheet-font);line-height:1.45}
+/* A4 page stack: #sheet is a container, each .page is exactly one sheet of paper */
+.sheet{width:210mm;display:flex;flex-direction:column;gap:20px;align-items:stretch}
 .sheet.fs-small{--sheet-font:11pt}.sheet.fs-medium{--sheet-font:12.2pt}.sheet.fs-large{--sheet-font:13.2pt}
 .sheet.mg-narrow{--sheet-pad:11mm}.sheet.mg-normal{--sheet-pad:18mm}.sheet.mg-wide{--sheet-pad:23mm}
+.page{position:relative;background:#fff;width:210mm;min-height:297mm;padding:var(--sheet-pad);box-shadow:0 10px 30px rgba(0,0,0,.35);color:#111;font-size:var(--sheet-font);line-height:1.45}
+.page.measure{position:absolute;left:-10000px;top:0;visibility:hidden;box-shadow:none}
+.page-gap{align-self:center;margin:-10px 0;display:flex;align-items:center;gap:10px;color:#b91c1c;font-size:11px;letter-spacing:.04em}
+.page-gap::before,.page-gap::after{content:"";height:2px;background:#ef4444;flex:1;border-radius:2px}
+.page-foot{position:absolute;left:var(--sheet-pad);right:var(--sheet-pad);bottom:9mm;display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e2e8f0;padding-top:3px;font-size:8.5pt;color:#64748b}
 
 /* resume internals */
 .r-name{margin:0;font-size:24pt;line-height:1.1}
@@ -89,10 +94,9 @@ label{display:block;font-size:12.5px;color:#334155;margin:8px 0 2px}
 .tpl-sidebar .r-side .r-sec-title{border-color:#0f172a}
 .tpl-sidebar .r-name{font-size:20pt}
 
-/* page break UI */
+/* page break UI: markers only ever exist in the preview, never in the page boxes */
 .pb-indicator{border-top:2px dashed #ef4444;margin:14px calc(var(--sheet-pad) * -1);position:relative;break-before:page;height:0}
 .pb-indicator::after{content:"PAGE BREAK — prints as new A4 page";position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:#ef4444;color:#fff;font-size:8pt;padding:1px 10px;border-radius:20px;white-space:nowrap;font-family:Arial,sans-serif}
-.page-footer{margin-top:12px;font-size:8.5pt;color:#64748b;display:flex;justify-content:space-between}
 
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:9px 16px;border-radius:20px;font-size:13px;z-index:50;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s}
 .toast.show{opacity:1;visibility:visible}
@@ -129,29 +133,36 @@ label{display:block;font-size:12.5px;color:#334155;margin:8px 0 2px}
   .editor{max-height:none;overflow:visible}
   .preview-pane{position:static}
   .preview-scroll{max-height:none}
-  .sheet{width:100%;min-height:auto}
+  .page{width:100%;min-height:auto;padding:12px}
+  .page-foot{position:static;margin-top:10px}
   .mobile-tabs{display:flex}
   body.show-preview #editor{display:none}
   body.show-editor .preview-pane{display:none}
 }
 
-/* ---- PRINT: only the sheet ---- */
+/* ---- PRINT: one .page box = one sheet of paper ---- */
 @media print{
-  @page{size:A4;margin:12mm;@bottom-center{content:counter(page) " / " counter(pages);font-size:8.5pt;color:#64748b}}
+  @page{size:A4;margin:12mm}
   body{background:#fff}
   .no-print{display:none !important}
   #json-view{display:none !important}
   /* safety net: printing must never be blank, whatever view is active */
-  #sheet{display:block !important}
+  #sheet{display:flex !important}
   .layout{display:block;padding:0;margin:0;max-width:none}
   .preview-pane{position:static}
   .preview-scroll{background:#fff;padding:0;display:block;max-height:none;overflow:visible}
-  .sheet{box-shadow:none;width:auto;min-height:auto;padding:0;margin:0}
-  .tpl-modern .r-head{margin:0 0 10px;padding:12px 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .tpl-sidebar .r-side{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .pb-indicator{border:none;margin:0}
-  .pb-indicator::after{display:none}
-  .pb-indicator{break-before:page}
-  .r-sec,.r-job,.skill-group{break-inside:avoid}
+  .sheet{width:auto;gap:0}
+  .page{width:auto;min-height:0;padding:0;margin:0;box-shadow:none;break-inside:auto;break-after:page}
+  .page:last-child{break-after:auto}
+  .page.measure{display:none !important}
+  .page-gap,.pb-indicator{display:none !important}
+  .page-foot{position:static;margin-top:10px}
+  .tpl-modern .r-head{margin:0 0 8px;padding:8px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .tpl-sidebar .r-cols{gap:6mm}
+  .tpl-sidebar .r-side{margin:0;padding:4mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* keep headings with their content, but never push a whole (multi-page) section to a new page */
+  .r-sec,.r-job{break-inside:auto;orphans:2;widows:2}
+  .r-sec-title,.r-job-head,.r-job-sub{break-after:avoid}
+  .skill-group,.pills span{break-inside:avoid}
   a{color:inherit;text-decoration:none}
 }

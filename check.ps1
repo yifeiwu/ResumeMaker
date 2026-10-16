@@ -50,7 +50,7 @@ if (-not $browser) {
   exit 2
 }
 
-$profile = Join-Path $env:TEMP "resume-builder-headless"
+$profile = Join-Path $env:TEMP ("resume-builder-headless-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
 $server = $null
 try {
@@ -96,6 +96,8 @@ try {
   $failures++
 } finally {
   if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+  # fresh profile per run: a reused one can serve a cached app.js and pass against stale code
+  Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 if ($failures -gt 0) { Write-Host ""; Write-Host "$failures suite(s) failing" -ForegroundColor Red; exit 1 }

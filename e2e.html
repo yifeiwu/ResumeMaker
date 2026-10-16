@@ -1,20 +1,21 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Resume Builder â€” browser integration test</title>
+<title>Resume Builder — browser integration test</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px}
 .pass{color:#15803d}.fail{color:#b91c1c}.info{color:#64748b}li{margin:3px 0}
-#app{width:100%;height:640px;border:1px solid #cbd5e1;border-radius:8px;margin-top:10px}
+#app{width:1280px;height:640px;border:1px solid #cbd5e1;border-radius:8px;margin-top:10px}
+body{max-width:none}
 </style>
 </head>
 <body>
 <h1>Browser integration test</h1>
 <p>Drives the real <code>index.html</code> in an iframe: JSON view round-trip, invalid input, staleness guard, export/print paths, undo granularity. Serve over http (<code>python -m http.server 8000</code>) then open <code>/e2e.html</code>, or run <code>.\check.ps1</code>.</p>
 <ul id="results"></ul>
-<h2 id="summary">runningâ€¦</h2>
+<h2 id="summary">running…</h2>
 <div id="host"><iframe id="app" src="index.html" title="App under test"></iframe></div>
 <script>
 const log = [];
@@ -50,12 +51,77 @@ async function run() {
     const input = (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input", { bubbles: true })); };
     // paint synchronously so assertions never race the coalesced preview
     const flush = () => R.flushPreview();
+    flush(); // the very first paint is frame-coalesced - force it before asserting
 
     say("editor rendered", !!$("#editor h2"));
     say("profile UI removed", !/Profile/.test($("#editor").textContent));
     say("example resume auto-loaded", R.getState().contact.fullName === "Alex Morgan");
     say("sheet has content", $("#sheet").textContent.length > 400);
     say("example banner shown", $("#example-banner").hidden === false);
+
+    // ---- A4 pagination -------------------------------------------------------
+    const boxes = () => Array.from(d.querySelectorAll("#sheet .page"));
+    const overflows = (p) => {
+      const cs = getComputedStyle(p);
+      const cap = p.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 18;
+      const kids = Array.from(p.children).filter((k) => !k.classList.contains("page-foot"));
+      const used = kids.length ? kids[kids.length - 1].getBoundingClientRect().bottom - kids[0].getBoundingClientRect().top : 0;
+      return used - cap;
+    };
+    const pagesNow = boxes();
+    say("preview shows real A4 page boxes", pagesNow.length >= 1);
+    say("page estimate matches the page boxes", $("#page-est").textContent.indexOf(pagesNow.length + " page") === 0);
+    say("page boxes are A4 sized", pagesNow.every((p) => p.getBoundingClientRect().width > 600 && p.getBoundingClientRect().height > 900));
+    say("no page overflows its A4 box", pagesNow.every((p) => overflows(p) < 8));
+    // pagination must never drop or invent content, in any template
+    const strip = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const flatTxt = strip(R.buildSheetHtml());
+    const pagedTxt = strip(Array.from(d.querySelectorAll("#sheet .page")).map((p) => p.innerHTML).join(" "));
+    const lost = ["Alex Morgan", "Northwind Labs", "Brightline Health", "Citysoft", "Summary", "Experience", "Skills", "Education"]
+      .filter((n) => flatTxt.indexOf(n) > -1 && pagedTxt.indexOf(n) === -1);
+    say("pagination preserves all content (ats)", lost.length === 0);
+    say("page footers and repeated section titles are the only additions",
+      pagedTxt.length >= flatTxt.length && pagedTxt.length - flatTxt.length < flatTxt.length * 0.4);
+    $('[data-tpl="sidebar"]').click();
+    flush();
+    const sideTxt = strip(Array.from(d.querySelectorAll("#sheet .page")).map((p) => p.innerHTML).join(" "));
+    const lostSide = ["Alex Morgan", "Northwind Labs", "Citysoft", "Summary", "Experience", "Skills", "Education"]
+      .filter((n) => sideTxt.indexOf(n) === -1);
+    say("pagination preserves all content (sidebar)", lostSide.length === 0);
+    $('[data-tpl="ats"]').click();
+    flush();
+    say("footers carry accurate page numbers", pagesNow.every((p, i) => {
+      const foot = p.querySelector(".page-foot");
+      return !foot || foot.textContent.indexOf("Page " + (i + 1) + " of " + pagesNow.length) > -1;
+    }));
+    say("no break markers leak into page boxes", !pagesNow.some((p) => p.querySelector(".pb-indicator")));
+    const pagesBefore = pagesNow.length;
+    // a manual section break must start that section on a fresh, labelled page
+    $('[data-act="sec-break"][data-id="education"]').click();
+    flush();
+    const after = boxes();
+    say("manual break is labelled in the preview", d.querySelectorAll("#sheet .page-gap").length === 1);
+    const eduIdx = after.findIndex((p) => {
+      const t = p.querySelector(".r-sec-title");
+      return t && t.textContent === "Education";
+    });
+    say("manual break pushes the section onto a new page", eduIdx > 0);
+    say("no break markers leak into page boxes", !after.some((p) => p.querySelector(".pb-indicator")));
+    say("break flags are stripped from output HTML", !$("#sheet").innerHTML.includes('data-pb'));
+    $('[data-act="sec-break"][data-id="education"]').click(); // revert
+    flush();
+    say("reverting the break restores the page count", boxes().length === pagesBefore);
+
+    // job-level breaks are nested inside the section - they must not break pagination
+    $('[data-act="job-break"][data-i="2"]').click();
+    flush();
+    const withJobBreak = boxes();
+    say("job-level break still paginates", withJobBreak.length > 1);
+    say("job-level break causes no page overflow", withJobBreak.every((p) => overflows(p) < 8));
+    say("job-level break adds no marker to page boxes", !withJobBreak.some((p) => p.querySelector(".pb-indicator")));
+    $('[data-act="job-break"][data-i="2"]').click(); // revert
+    flush();
+    say("reverting the job break restores the page count", boxes().length === pagesBefore);
 
     // ---- JSON view round-trip -------------------------------------------------
     const sheet = $("#sheet"), jv = $("#json-view"), ta = $("#json-view-text");
@@ -100,6 +166,11 @@ async function run() {
     say("json view re-opened", sheet.hidden === true);
     $("#btn-export-html").click();
     say("export html ignores json view", sheet.hidden === false);
+    $("#btn-export-html").click();
+    const htmlTxt = await captured.text();
+    say("export html keeps template css", htmlTxt.indexOf(".r-cols") > -1 && htmlTxt.indexOf("@page") > -1);
+    say("export html prints one box per page", htmlTxt.indexOf("break-after:page") > -1 && htmlTxt.indexOf('class="page"') > -1);
+    say("export html hides break markers", /pb-indicator[^{]*\{[^}]*display:none/.test(htmlTxt));
     $("#btn-export-txt").click();
     say("export txt produced a file", !!captured);
     const txt = await captured.text();

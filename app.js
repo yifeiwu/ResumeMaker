@@ -734,7 +734,10 @@ function buildSheetHtml() {
   if (tpl === "sidebar") {
     const side = order.filter((id) => sideIds.includes(id)).map((id) => sectionHtml(id, false)).join("");
     const main = order.filter((id) => !sideIds.includes(id)).map((id) => sectionHtml(id, false)).join("");
-    body = `${head}<div class="r-cols"><div class="r-side">${side || `<p class="hint no-print">Enable Skills / Certs / Languages to fill the sidebar.</p>`}</div><div>${main}</div></div>`;
+    /* head + columns travel as one atomic page: the two-column grid can never split, so an
+       orphaned header alone on page 1 (with a nameless grid spilling after it) is worse than
+       one overflowing page with an honest overflow warning. */
+    body = `<div class="r-atomic">${head}<div class="r-cols"><div class="r-side">${side || `<p class="hint no-print">Enable Skills / Certs / Languages to fill the sidebar.</p>`}</div><div>${main}</div></div></div>`;
   } else {
     body = `${head}${order.map((id) => sectionHtml(id, tpl === "modern")).join("")}`;
   }
@@ -860,7 +863,7 @@ function paginateHtml(flatHtml) {
 }
 /* keep splitting a block until every piece actually fits one page (guaranteed progress, depth-capped) */
 function atomize(node, probe, limit, depth, firstLimit) {
-  if (node.classList && node.classList.contains("r-cols")) return [node]; // two-column grid: never split
+  if (node.classList && (node.classList.contains("r-cols") || node.classList.contains("r-atomic"))) return [node]; // unsplittable page unit: never split
   if (!node.isConnected) probe.appendChild(node);
   const lim = depth === 0 && firstLimit ? firstLimit : limit;
   if (blockExtent(node) <= lim || !node.children.length || depth > 6) return [node];
@@ -1206,6 +1209,11 @@ function bindToolbar() {
   // never lose the last debounced keystrokes to a closed tab
   document.addEventListener("visibilitychange", () => { if (document.hidden) persist(true); });
   window.addEventListener("pagehide", () => persist(true));
+  /* Ctrl+P / File→Print bypasses the Print button: persist, force the resume view and repaint
+     first so the dialog never prints a stale snapshot, then restore the JSON view afterwards */
+  let viewBeforePrint = null;
+  window.addEventListener("beforeprint", () => { viewBeforePrint = activeView; persist(true); showResumeView(); paintPreview(); });
+  window.addEventListener("afterprint", () => { if (viewBeforePrint === "json") setView("json"); viewBeforePrint = null; });
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return; // let native undo work while typing
@@ -1218,6 +1226,9 @@ function bindToolbar() {
     document.body.classList.toggle("show-preview", which === "preview");
     if (te) { te.classList.toggle("active", which === "edit"); te.setAttribute("aria-pressed", String(which === "edit")); }
     if (tp) { tp.classList.toggle("active", which === "preview"); tp.setAttribute("aria-pressed", String(which === "preview")); }
+    /* repaint on switch: the page estimate is measured from live layout, so a hidden preview
+       pane (mobile Edit tab) would compute zeroes and clear a valid overflow warning */
+    renderPreview();
   };
   if (te) te.addEventListener("click", () => setTab("edit"));
   if (tp) tp.addEventListener("click", () => setTab("preview"));

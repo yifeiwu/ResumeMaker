@@ -235,6 +235,16 @@ async function run() {
     w.print = function () {};
     $("#btn-print").click();
     say("print button forces the resume view", sheet.hidden === false);
+
+    // ---- browser print (Ctrl+P) persists, forces resume view, restores json view
+    $('[data-view="json"]').click();
+    say("json view on for beforeprint test", sheet.hidden === true);
+    w.dispatchEvent(new w.Event("beforeprint"));
+    flush();
+    say("beforeprint forces the resume view", sheet.hidden === false);
+    w.dispatchEvent(new w.Event("afterprint"));
+    flush();
+    say("afterprint restores the json view", sheet.hidden === true);
     info("storage keys: " + Object.keys(w.localStorage).filter((k) => k.indexOf("resume-builder") === 0).join(", "));
     paint();
   } catch (e) {

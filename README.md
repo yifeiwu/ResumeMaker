@@ -37,18 +37,21 @@ Or just open `index.html` directly (file:// works, Export/Print work best over h
 - **Example resume:** auto-loads on first visit (`Alex Morgan` demo, 3 jobs, `breakBefore` on the 3rd to show 2-page output); `Load example` anytime
 - **Printable file:** `Print / PDF` (A4, selectable text), `Export .txt` plain-text ATS version, and `Quick PDF` - a one-click PDF of **every** A4 page, assembled page-by-page from the preview boxes via html2canvas + jsPDF (both SRI-pinned from CDN, so it needs network). Quick PDF is rasterized, so its text is not selectable; use `Print / PDF` when you need selectable text
 - **Privacy:** everything stays in `localStorage`; Privacy card has Redact toggle + Erase-all (also purges keys from the retired multi-profile version); mobile Edit/Preview tabs, skip link, focus-visible styles, `aria-pressed` toggles
-- **Self-test:** `/test.html` (14 unit checks) + `/e2e.html` (55 browser integration checks) — no network, no build; `./check.ps1` runs both
+- **Self-test:** `/test.html` (15 unit checks) + `/e2e.html` (58 browser integration checks) — no network, no build; `./check.ps1` runs both. `./print-check.ps1` additionally prints `/print-probe.html` (all 3 templates) to real PDFs in headless Edge and verifies sheet size/count/footers with pypdf
 
 ## Verify
 
 ```powershell
 .\check.ps1
 # starts a temp server, runs /test.html + /e2e.html in headless Edge, exits non-zero on failure
+.\print-check.ps1
+# prints /print-probe.html?tpl=ats|modern|sidebar to real PDFs and verifies A4 sheets,
+# preview==print page counts and Page X of Y footers (needs the pypdf python package)
 ```
 
 Open them by hand instead: `python -m http.server 8000`, then
-`http://localhost:8000/test.html` (14 unit checks) and `http://localhost:8000/e2e.html`
-(55 browser integration checks: JSON view round-trip, invalid input, staleness guard, export/print
+`http://localhost:8000/test.html` (15 unit checks) and `http://localhost:8000/e2e.html`
+(58 browser integration checks: JSON view round-trip, invalid input, staleness guard, export/print
 paths, undo granularity, A4 pagination incl. a no-content-loss invariant).
 
 ## Desktop-first

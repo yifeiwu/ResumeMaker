@@ -138,6 +138,15 @@ t("custom sections: legacy shape, per-item hide, paragraph layout", () => {
   R().setState({ contact: { fullName: "A" }, customSections: [{ id: "x", title: "Vol", layout: "text", items: [{ text: "line one\nline two" }] }] });
   ok(R().buildSheetHtml().includes('class="preserve"'), "paragraph layout should preserve line breaks");
 });
+t("sidebar keeps header and columns on one atomic page", () => {
+  R().setState(R().sampleState());
+  R().getState().settings.templateId = "sidebar";
+  const html = R().buildSheetHtml();
+  ok(html.includes('class="r-atomic"'), "sidebar head+cols not wrapped in one atomic block");
+  ok(html.indexOf("r-head") < html.indexOf("r-cols"), "header must lead the atomic block, not orphan alone on page 1");
+  ok(html.includes("r-side"), "sidebar column missing");
+  R().setState(R().defaultState());
+});
 const ul = document.getElementById("results");
 let fails = 0;
 out.forEach(([pass, name]) => {

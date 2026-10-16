@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Resume Builder — print probe</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<p class="no-print">Deterministic fixture for <code>print-check.ps1</code>: loads the example resume plus four
+cloned jobs (so output spans pages), selects <code>?tpl=ats|modern|sidebar</code>, and records the
+preview page count in the title. Not for manual use.</p>
+<div id="editor" hidden></div>
+<p class="preview-hint no-print"><span id="page-est">— pages</span></p>
+<div id="preview-scroll"><div id="sheet" class="sheet"></div></div>
+<script src="app.js"></script>
+<script>
+(function () {
+  try {
+    const tpl = new URLSearchParams(location.search).get("tpl") || "ats";
+    const s = window.ResumeTest.sampleState();
+    const j0 = JSON.parse(JSON.stringify(s.experience[0]));
+    for (let i = 0; i < 4; i++) {
+      const c = JSON.parse(JSON.stringify(j0));
+      c.company = "Extra Corp " + (i + 1);
+      c.title = "Engineer " + (i + 1);
+      s.experience.push(c);
+    }
+    if (tpl === "ats" || tpl === "modern" || tpl === "sidebar") s.settings.templateId = tpl;
+    window.ResumeTest.setState(s);
+    window.ResumeTest.flushPreview();
+    const n = document.querySelectorAll("#sheet .page").length;
+    document.title = "printprobe-" + s.settings.templateId + "-" + n + "pg";
+  } catch (e) { document.title = "printprobe-error:" + (e && e.message); }
+})();
+</script>
+</body>
+</html>

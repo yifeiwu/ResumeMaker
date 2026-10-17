@@ -330,7 +330,12 @@ function normalizeImport(obj) {
 function allSections() {
   const customs = state.customSections.map((c) => ({ id: "custom_" + c.id, label: c.title || "Custom section" }));
   const fixed = SECTION_DEFS.map((d) => ({ ...d }));
-  const order = state.sectionOrder.filter((id) => fixed.some((f) => f.id === id) || id.startsWith("custom_"));
+  const seen = new Set();
+  const order = state.sectionOrder.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return fixed.some((f) => f.id === id) || id.startsWith("custom_");
+  });
   fixed.forEach((f) => { if (!order.includes(f.id)) order.push(f.id); });
   customs.forEach((c) => { if (!order.includes(c.id)) order.push(c.id); });
   return { order, fixed, customs };
@@ -358,7 +363,7 @@ function isSectionEmpty(id) {
 function fmtDate(v) {
   if (!v) return "";
   const m = /^(\d{4})-(\d{2})$/.exec(v);
-  if (m) { const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]; return months[+m[2] - 1] + " " + m[1]; }
+  if (m) { const mi = +m[2]; if (mi < 1 || mi > 12) return v; const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]; return months[mi - 1] + " " + m[1]; }
   return v;
 }
 function dateRange(s, e, cur) { return [fmtDate(s), cur ? "Present" : fmtDate(e)].filter(Boolean).join(" – "); }
@@ -1121,6 +1126,7 @@ function doImportFile(file) {
       requestReplace(obj, "Open JSON file?");
     } catch { toast("Could not parse JSON file", 3000); }
   };
+  r.onerror = () => toast("Could not read file", 3000);
   r.readAsText(file);
 }
 /* SRI-pinned PDF libraries: html2canvas rasterises one A4 page box, jsPDF assembles the pages.
@@ -1210,10 +1216,28 @@ function bindToolbar() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) persist(true); });
   window.addEventListener("pagehide", () => persist(true));
   /* Ctrl+P / File→Print bypasses the Print button: persist, force the resume view and repaint
-     first so the dialog never prints a stale snapshot, then restore the JSON view afterwards */
+     first so the dialog never prints a stale snapshot, then restore the JSON view afterwards. */
   let viewBeforePrint = null;
-  window.addEventListener("beforeprint", () => { viewBeforePrint = activeView; persist(true); showResumeView(); paintPreview(); });
-  window.addEventListener("afterprint", () => { if (viewBeforePrint === "json") setView("json"); viewBeforePrint = null; });
+  let jsonDraftBeforePrint = null;
+  window.addEventListener("beforeprint", () => {
+    viewBeforePrint = activeView;
+    if (activeView === "json") {
+      const ta = $("#json-view-text");
+      if (ta && ta.value !== jsonRendered) jsonDraftBeforePrint = ta.value;
+    }
+    persist(true); showResumeView(); paintPreview();
+  });
+  window.addEventListener("afterprint", () => {
+    if (viewBeforePrint === "json") {
+      setView("json");
+      if (jsonDraftBeforePrint !== null) {
+        const ta = $("#json-view-text");
+        if (ta) { ta.value = jsonDraftBeforePrint; setJsonStale(true); }
+      }
+    }
+    viewBeforePrint = null;
+    jsonDraftBeforePrint = null;
+  });
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return; // let native undo work while typing
